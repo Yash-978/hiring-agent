@@ -60,5 +60,5 @@ with psycopg.connect(
             )
             print(f"Database '{db_name}' created.")
 
-print("\nDone. Put this in backend/.env (replace Yash1234):")
-print(f"DATABASE_URL=postgresql+psycopg://hiring_user:Yash1234@localhost:5432/hiring_agent")
+print("\nDone. Put this in backend/.env (replace YOUR_PASSWORD):")
+print(f"DATABASE_URL=postgresql+psycopg://{app_user}:YOUR_PASSWORD@{host}:{port}/{db_name}")
