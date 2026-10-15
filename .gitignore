@@ -1,0 +1,29 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Secrets and local config (NEVER commit)
+.env
+.env.*
+!.env.example
+
+# Local databases and generated files
+*.db
+*.sqlite3
+backend/storage/
+
+# Node / frontend
+node_modules/
+dist/
+*.tsbuildinfo
+
+# Editors and OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Agent tooling scratch
+.opencode/
