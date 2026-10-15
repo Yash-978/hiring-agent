@@ -12,8 +12,12 @@ from app.exceptions import (
     NotFoundException,
 )
 import app.models  # noqa: F401
+from app.routes.applications import router as applications_router
 from app.routes.approvals import router as approvals_router
 from app.routes.auth import router as auth_router
+from app.routes.candidates import router as candidates_router
+from app.routes.jobs import router as jobs_router
+from app.routes.letters import router as letters_router
 
 
 @asynccontextmanager
@@ -41,6 +45,10 @@ app.add_middleware(
 
 app.include_router(auth_router)
 app.include_router(approvals_router)
+app.include_router(jobs_router)
+app.include_router(candidates_router)
+app.include_router(applications_router)
+app.include_router(letters_router)
 
 
 @app.exception_handler(NotFoundException)

@@ -1,3 +1,4 @@
+# pyrefly: ignore [missing-import]
 from sqlmodel import Session, select
 from app.models import AuditActorType, AuditLog, Tenant
 from app.services.audit_service import log_event

@@ -1,13 +1,16 @@
 import os
 from collections.abc import Generator
 from typing import Any
+# pyrefly: ignore [missing-import]
 import pytest
 from fastapi.testclient import TestClient
+# pyrefly: ignore [missing-import]
 from sqlmodel import Session, SQLModel, create_engine
-from sqlmodel.pool import StaticPool
+# pyrefly: ignore [missing-import]
+from sqlmodel.pool import StaticPool    
 
 # Ensure tests run against in-memory SQLite
-os.environ["DATABASE_URL"] = "sqlite://"
+os.environ["DATABASE_URL"] = "sqlite://"        
 os.environ["LLM_PROVIDER"] = "fake"
 
 from app.config import get_settings
