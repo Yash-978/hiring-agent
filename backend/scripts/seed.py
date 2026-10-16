@@ -109,13 +109,13 @@ def main() -> None:
 
         session.commit()
 
-        print(f"✓ Created tenant: {tenant.name} (id={tenant.id})")
-        print(f"✓ Created admin user: {user.email} (id={user.id})")
-        print(f"✓ Created job: {job.title} (id={job.id})")
-        print(f"✓ Created candidate: {cand1.full_name} (id={cand1.id})")
-        print(f"✓ Created candidate: {cand2.full_name} (id={cand2.id})")
-        print(f"✓ Created application for {cand1.full_name}")
-        print(f"✓ Created application for {cand2.full_name}")
+        print(f"[OK] Created tenant: {tenant.name} (id={tenant.id})")
+        print(f"[OK] Created admin user: {user.email} (id={user.id})")
+        print(f"[OK] Created job: {job.title} (id={job.id})")
+        print(f"[OK] Created candidate: {cand1.full_name} (id={cand1.id})")
+        print(f"[OK] Created candidate: {cand2.full_name} (id={cand2.id})")
+        print(f"[OK] Created application for {cand1.full_name}")
+        print(f"[OK] Created application for {cand2.full_name}")
         print(f"\nDemo data seeded successfully!")
         print(f"Login with: admin@demo.test / {seed_password}")
 

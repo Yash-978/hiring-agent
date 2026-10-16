@@ -8,9 +8,9 @@ from app.db import get_session
 from app.deps import get_current_user
 from app.exceptions import NotFoundException
 from app.models import User
-from app.schemas.application import ApplicationCreate, ApplicationRead
+from app.schemas.application import ApplicationCreate, ApplicationRead, AuditLogRead
 from app.schemas.letter import OfferDraftRequest
-from app.services import application_service
+from app.services import application_service, audit_service
 
 router = APIRouter(prefix="/applications", tags=["applications"])
 
@@ -218,4 +218,26 @@ def create_offer_draft(
         score=app.score,
         score_reasoning=app.score_reasoning,
         created_at=app.created_at,
+    )
+
+
+@router.get("/{id}/audit", response_model=list[AuditLogRead])
+def get_application_audit(
+    id: int,
+    session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_user),
+) -> list[AuditLogRead]:
+    """Get audit log events for a specific application (tenant-filtered, newest last)."""
+    # Verify application exists and belongs to tenant
+    application_service.get_application_with_details(
+        session=session,
+        application_id=id,
+        tenant_id=current_user.tenant_id,
+    )
+    # Return audit logs for this application
+    return audit_service.get_audit_logs_for_entity(
+        session=session,
+        tenant_id=current_user.tenant_id,
+        entity_type="application",
+        entity_id=id,
     )

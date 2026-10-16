@@ -1,5 +1,5 @@
 from typing import Any
-from sqlmodel import Session
+from sqlmodel import Session, select
 from app.models import AuditActorType, AuditLog
 
 
@@ -32,3 +32,22 @@ def log_event(
     session.add(entry)
     session.flush()
     return entry
+
+
+def get_audit_logs_for_entity(
+    session: Session,
+    tenant_id: int,
+    entity_type: str,
+    entity_id: int,
+) -> list[AuditLog]:
+    """Retrieve audit log entries for a specific entity, newest last."""
+    statement = (
+        select(AuditLog)
+        .where(
+            AuditLog.tenant_id == tenant_id,
+            AuditLog.entity_type == entity_type,
+            AuditLog.entity_id == entity_id,
+        )
+        .order_by(AuditLog.created_at.asc())
+    )
+    return list(session.exec(statement).all())

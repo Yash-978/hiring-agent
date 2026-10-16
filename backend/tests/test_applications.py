@@ -411,3 +411,84 @@ def test_analyze_application_cross_tenant_isolation(
         files=files,
     )
     assert resp.status_code == 404
+
+
+def test_get_application_audit_happy_path(
+    two_tenants: dict[str, dict[str, Any]],
+    client: TestClient,
+) -> None:
+    tenant_a = two_tenants["tenant_a"]
+
+    # Create candidate, job, application
+    cand = client.post(
+        "/candidates",
+        headers=tenant_a["headers"],
+        json={"full_name": "Eve", "email": "eve@example.com"},
+    ).json()
+    job = client.post(
+        "/jobs",
+        headers=tenant_a["headers"],
+        json={"title": "Dev", "description": "Python, FastAPI"},
+    ).json()
+    app = client.post(
+        "/applications",
+        headers=tenant_a["headers"],
+        json={"candidate_id": cand["id"], "job_id": job["id"]},
+    ).json()
+    app_id = app["id"]
+
+    # Analyze to generate audit entries
+    files = {"file": ("resume.txt", "Eve\n5 years Python", "text/plain")}
+    client.post(
+        f"/applications/{app_id}/analyze",
+        headers=tenant_a["headers"],
+        files=files,
+    )
+
+    # GET audit
+    audit_res = client.get(
+        f"/applications/{app_id}/audit",
+        headers=tenant_a["headers"],
+    )
+    assert audit_res.status_code == 200
+    audits = audit_res.json()
+    assert len(audits) >= 2
+    actions = {a["action"] for a in audits}
+    assert "create_application" in actions
+    assert "analyze_resume" in actions
+    # Check ordering: oldest first (created_at asc)
+    created_times = [a["created_at"] for a in audits]
+    assert created_times == sorted(created_times)
+
+
+def test_get_application_audit_cross_tenant_isolation(
+    two_tenants: dict[str, dict[str, Any]],
+    client: TestClient,
+) -> None:
+    tenant_a = two_tenants["tenant_a"]
+    tenant_b = two_tenants["tenant_b"]
+
+    cand = client.post(
+        "/candidates",
+        headers=tenant_a["headers"],
+        json={"full_name": "Frank", "email": "frank@example.com"},
+    ).json()
+    job = client.post(
+        "/jobs",
+        headers=tenant_a["headers"],
+        json={"title": "Dev", "description": "Python"},
+    ).json()
+    app = client.post(
+        "/applications",
+        headers=tenant_a["headers"],
+        json={"candidate_id": cand["id"], "job_id": job["id"]},
+    ).json()
+    app_id = app["id"]
+
+    # Tenant B tries to GET audit for Tenant A's application -> 404
+    cross_res = client.get(
+        f"/applications/{app_id}/audit",
+        headers=tenant_b["headers"],
+    )
+    assert cross_res.status_code == 404
+    assert "not found" in cross_res.json()["detail"].lower()
