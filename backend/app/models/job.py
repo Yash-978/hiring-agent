@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 from enum import Enum
-from sqlalchemy import Column, String
+from sqlalchemy import Column, JSON, String
 from sqlmodel import Field, SQLModel
 
 
@@ -20,6 +20,13 @@ class Job(SQLModel, table=True):
         default=JobStatus.OPEN,
         sa_column=Column(String, nullable=False, default=JobStatus.OPEN.value),
     )
+    must_have_skills: list[str] = Field(
+        default_factory=list, sa_column=Column(JSON, nullable=False, default=list)
+    )
+    nice_to_have_skills: list[str] = Field(
+        default_factory=list, sa_column=Column(JSON, nullable=False, default=list)
+    )
+    min_years_experience: float | None = Field(default=None)
     created_at: datetime = Field(
         default_factory=lambda: datetime.now(timezone.utc)
     )

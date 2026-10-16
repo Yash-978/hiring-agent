@@ -23,6 +23,9 @@ def create_job(
         title=data.title,
         description=data.description,
         status=data.status,
+        must_have_skills=data.must_have_skills,
+        nice_to_have_skills=data.nice_to_have_skills,
+        min_years_experience=data.min_years_experience,
         creator_name=current_user.email,
     )
     return JobRead.model_validate(job)

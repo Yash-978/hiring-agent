@@ -6,6 +6,9 @@ class JobCreate(BaseModel):
     title: str
     description: str
     status: str = "open"
+    must_have_skills: list[str] = []
+    nice_to_have_skills: list[str] = []
+    min_years_experience: float | None = None
 
 
 class JobRead(BaseModel):
@@ -15,4 +18,7 @@ class JobRead(BaseModel):
     title: str
     description: str
     status: str
+    must_have_skills: list[str] = []
+    nice_to_have_skills: list[str] = []
+    min_years_experience: float | None = None
     created_at: datetime

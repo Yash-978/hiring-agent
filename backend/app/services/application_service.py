@@ -18,6 +18,7 @@ from app.services.audit_service import log_event
 from app.agents import (
     analyze_resume,
     draft_offer,
+    extract_job_requirements,
     get_llm_client,
     LLMError,
     OfferDraft,
@@ -135,6 +136,33 @@ def analyze_application(
         session.add(candidate)
 
     client = get_llm_client()
+
+    # Extract structured requirements from the job description when the job
+    # was created without them. On failure, log and leave the job empty.
+    if (
+        not job.must_have_skills
+        and not job.nice_to_have_skills
+        and job.min_years_experience is None
+    ):
+        try:
+            requirements = extract_job_requirements(client, job.description)
+        except LLMError:
+            log_event(
+                session=session,
+                tenant_id=tenant_id,
+                actor_type=AuditActorType.AGENT,
+                actor_name="job_agent",
+                action="job_extraction_failed",
+                entity_type="job",
+                entity_id=job.id,
+                details={},
+            )
+        else:
+            job.must_have_skills = requirements.must_have_skills
+            job.nice_to_have_skills = requirements.nice_to_have_skills
+            job.min_years_experience = requirements.min_years_experience
+            session.add(job)
+
     try:
         analysis = analyze_resume(client, resume_text, job.description)
     except LLMError as e:

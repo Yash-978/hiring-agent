@@ -35,6 +35,14 @@ class FakeLLMClient(LLMClient):
         self, system: str, prompt: str, schema: type[T]
     ) -> T:
         """Return a deterministic valid object for known schemas."""
+        if schema.__name__ == "JobRequirements":
+            return schema.model_validate(
+                {
+                    "must_have_skills": ["Python", "FastAPI"],
+                    "nice_to_have_skills": ["Docker"],
+                    "min_years_experience": 3.0,
+                }
+            )
         if schema.__name__ == "ResumeAnalysis":
             return schema.model_validate(
                 {

@@ -11,6 +11,9 @@ def create_job(
     title: str,
     description: str,
     status: str | JobStatus = JobStatus.OPEN,
+    must_have_skills: list[str] | None = None,
+    nice_to_have_skills: list[str] | None = None,
+    min_years_experience: float | None = None,
     creator_name: str = "",
 ) -> Job:
     """Create a new job for the tenant and log an audit entry."""
@@ -20,6 +23,9 @@ def create_job(
         title=title,
         description=description,
         status=JobStatus(status_val) if status_val in ("open", "closed") else JobStatus.OPEN,
+        must_have_skills=list(must_have_skills or []),
+        nice_to_have_skills=list(nice_to_have_skills or []),
+        min_years_experience=min_years_experience,
     )
     session.add(job)
     session.flush()
