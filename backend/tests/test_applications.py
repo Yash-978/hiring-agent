@@ -929,3 +929,176 @@ def test_download_application_resume_cross_tenant_is_404(
         f"/applications/{app['id']}/resume", headers=tenant_b["headers"]
     )
     assert resp.status_code == 404
+
+
+# --- Duplicate applications (TASK 5) --------------------------------------
+
+
+def test_duplicate_application_same_candidate_returns_409(
+    two_tenants: dict[str, dict[str, Any]],
+    client: TestClient,
+    session: Session,
+) -> None:
+    tenant_a = two_tenants["tenant_a"]
+
+    cand = client.post(
+        "/candidates",
+        headers=tenant_a["headers"],
+        json={"full_name": "Hal Jordan", "email": "hal@example.com"},
+    ).json()
+    job = client.post(
+        "/jobs",
+        headers=tenant_a["headers"],
+        json={"title": "Test Pilot", "description": "Fly the prototype"},
+    ).json()
+
+    first = client.post(
+        "/applications",
+        headers=tenant_a["headers"],
+        json={"candidate_id": cand["id"], "job_id": job["id"]},
+    )
+    assert first.status_code == 201
+
+    again = client.post(
+        "/applications",
+        headers=tenant_a["headers"],
+        json={"candidate_id": cand["id"], "job_id": job["id"]},
+    )
+    assert again.status_code == 409
+    body = again.json()
+    assert body["detail"] == "This candidate has already applied to this job"
+    assert body["existing_application_id"] == first.json()["id"]
+    assert body["candidate_id"] == cand["id"]
+
+    # The rejected attempt must not have written a second application or audit.
+    stored = session.exec(
+        select(Application).where(
+            Application.tenant_id == tenant_a["tenant"].id,
+            Application.job_id == job["id"],
+        )
+    ).all()
+    assert len(stored) == 1
+    audits = session.exec(
+        select(AuditLog).where(
+            AuditLog.tenant_id == tenant_a["tenant"].id,
+            AuditLog.action == "create_application",
+        )
+    ).all()
+    assert len(audits) == 1
+
+
+def test_duplicate_application_by_email_returns_409(
+    two_tenants: dict[str, dict[str, Any]],
+    client: TestClient,
+) -> None:
+    """A second candidate row with the same email is the same person."""
+    tenant_a = two_tenants["tenant_a"]
+
+    first_cand = client.post(
+        "/candidates",
+        headers=tenant_a["headers"],
+        json={"full_name": "Barry Allen", "email": "barry@example.com"},
+    ).json()
+    # Same person, different row, different casing of the email.
+    second_cand = client.post(
+        "/candidates",
+        headers=tenant_a["headers"],
+        json={"full_name": "B. Allen", "email": "BARRY@example.com"},
+    ).json()
+    assert first_cand["id"] != second_cand["id"]
+
+    job = client.post(
+        "/jobs",
+        headers=tenant_a["headers"],
+        json={"title": "Forensics Analyst", "description": "Examine evidence"},
+    ).json()
+
+    first = client.post(
+        "/applications",
+        headers=tenant_a["headers"],
+        json={"candidate_id": first_cand["id"], "job_id": job["id"]},
+    )
+    assert first.status_code == 201
+
+    again = client.post(
+        "/applications",
+        headers=tenant_a["headers"],
+        json={"candidate_id": second_cand["id"], "job_id": job["id"]},
+    )
+    assert again.status_code == 409
+    assert again.json()["existing_application_id"] == first.json()["id"]
+
+
+def test_same_candidate_can_apply_to_two_jobs(
+    two_tenants: dict[str, dict[str, Any]],
+    client: TestClient,
+) -> None:
+    tenant_a = two_tenants["tenant_a"]
+
+    cand = client.post(
+        "/candidates",
+        headers=tenant_a["headers"],
+        json={"full_name": "Clark Kent", "email": "clark@example.com"},
+    ).json()
+    job_one = client.post(
+        "/jobs",
+        headers=tenant_a["headers"],
+        json={"title": "Reporter", "description": "Write stories"},
+    ).json()
+    job_two = client.post(
+        "/jobs",
+        headers=tenant_a["headers"],
+        json={"title": "Photo Editor", "description": "Edit photos"},
+    ).json()
+
+    for job in (job_one, job_two):
+        resp = client.post(
+            "/applications",
+            headers=tenant_a["headers"],
+            json={"candidate_id": cand["id"], "job_id": job["id"]},
+        )
+        assert resp.status_code == 201
+
+
+def test_same_candidate_email_allowed_in_another_tenant(
+    two_tenants: dict[str, dict[str, Any]],
+    client: TestClient,
+) -> None:
+    tenant_a = two_tenants["tenant_a"]
+    tenant_b = two_tenants["tenant_b"]
+
+    email = "shared.person@example.com"
+    cand_a = client.post(
+        "/candidates",
+        headers=tenant_a["headers"],
+        json={"full_name": "Shared Person", "email": email},
+    ).json()
+    cand_b = client.post(
+        "/candidates",
+        headers=tenant_b["headers"],
+        json={"full_name": "Shared Person", "email": email},
+    ).json()
+    job_a = client.post(
+        "/jobs",
+        headers=tenant_a["headers"],
+        json={"title": "Account Manager", "description": "Own accounts"},
+    ).json()
+    job_b = client.post(
+        "/jobs",
+        headers=tenant_b["headers"],
+        json={"title": "Account Manager", "description": "Own accounts"},
+    ).json()
+
+    resp_a = client.post(
+        "/applications",
+        headers=tenant_a["headers"],
+        json={"candidate_id": cand_a["id"], "job_id": job_a["id"]},
+    )
+    resp_b = client.post(
+        "/applications",
+        headers=tenant_b["headers"],
+        json={"candidate_id": cand_b["id"], "job_id": job_b["id"]},
+    )
+    assert resp_a.status_code == 201
+    assert resp_b.status_code == 201
+    assert resp_a.json()["id"] != resp_b.json()["id"]

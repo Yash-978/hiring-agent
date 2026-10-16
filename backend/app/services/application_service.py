@@ -1,10 +1,11 @@
 from pathlib import Path
 import hashlib
 
+from sqlalchemy import func
 from sqlmodel import Session, select
 
 from app.config import get_settings
-from app.exceptions import NotFoundException
+from app.exceptions import ConflictException, NotFoundException
 from app.models import (
     Application,
     ApplicationStatus,
@@ -83,6 +84,48 @@ def _save_resume(
     return file_path.relative_to(storage_root).as_posix()
 
 
+def _reject_duplicate_application(
+    session: Session,
+    tenant_id: int,
+    candidate: Candidate,
+    job_id: int,
+) -> None:
+    """Raise ConflictException if this person already applied to this job.
+
+    A person is identified by candidate id, or by email address inside the
+    tenant, so re-uploading the same resume as a second candidate row cannot
+    create a duplicate application.
+    """
+    assert candidate.id is not None
+    candidate_ids: set[int] = {candidate.id}
+
+    normalized_email = candidate.email.strip().lower()
+    if normalized_email:
+        same_email_ids = session.exec(
+            select(Candidate.id).where(
+                Candidate.tenant_id == tenant_id,
+                func.lower(Candidate.email) == normalized_email,
+            )
+        ).all()
+        candidate_ids.update(int(cid) for cid in same_email_ids if cid is not None)
+
+    existing = session.exec(
+        select(Application).where(
+            Application.tenant_id == tenant_id,
+            Application.job_id == job_id,
+            Application.candidate_id.in_(candidate_ids),
+        )
+    ).first()
+    if existing is not None:
+        raise ConflictException(
+            "This candidate has already applied to this job",
+            payload={
+                "existing_application_id": existing.id,
+                "candidate_id": existing.candidate_id,
+            },
+        )
+
+
 def create_application(
     session: Session,
     tenant_id: int,
@@ -90,7 +133,11 @@ def create_application(
     job_id: int,
     creator_name: str = "",
 ) -> tuple[Application, str, str]:
-    """Create a new application verifying candidate and job belong to the tenant."""
+    """Create a new application, verifying candidate and job belong to the tenant.
+
+    Raises ConflictException when the same candidate (by id or by email inside
+    the tenant) already has an application for this job.
+    """
     candidate = session.get(Candidate, candidate_id)
     if not candidate or candidate.tenant_id != tenant_id:
         raise NotFoundException(f"Candidate {candidate_id} not found")
@@ -98,6 +145,8 @@ def create_application(
     job = session.get(Job, job_id)
     if not job or job.tenant_id != tenant_id:
         raise NotFoundException(f"Job {job_id} not found")
+
+    _reject_duplicate_application(session, tenant_id, candidate, job_id)
 
     application = Application(
         tenant_id=tenant_id,
