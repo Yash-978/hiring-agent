@@ -5,6 +5,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app.db import create_db_and_tables
+
+
 from app.exceptions import (
     ApprovalRequiredException,
     ConflictException,
@@ -30,6 +32,12 @@ app = FastAPI(
     title="Hiring Agent API",
     lifespan=lifespan,
 )
+
+from fastapi.responses import RedirectResponse
+
+@app.get("/", include_in_schema=False)
+def root() -> RedirectResponse:
+    return RedirectResponse(url="/docs")
 
 origins = [
     "http://localhost:5173",
