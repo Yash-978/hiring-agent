@@ -11,6 +11,7 @@ export interface Job {
   title: string;
   description: string;
   status: string;
+  candidate_count: number;
   created_at: string;
 }
 
@@ -217,15 +218,22 @@ export interface CompareCriterion {
 export interface CompareCandidate {
   application_id: number;
   name: string;
-  score: number;
+  score: number | null;
   recommendation: string;
   confidence: string;
   years: number | null;
   breakdown: Record<string, number>;
   criteria: CompareCriterion[];
+  flags: string[];
+}
+
+export interface JobComparisonCounts {
+  total: number;
+  scored: number;
 }
 
 export interface JobComparison {
   job: CompareJob;
   candidates: CompareCandidate[];
+  counts: JobComparisonCounts;
 }

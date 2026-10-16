@@ -1,7 +1,7 @@
 import logging
 import re
 
-from sqlalchemy import inspect, text
+from sqlalchemy import func, inspect, text
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
@@ -10,6 +10,7 @@ from app.exceptions import ConflictException, NotFoundException
 from app.models import Application, AuditActorType, Candidate, Job, JobStatus
 from app.schemas.job import (
     CompareCandidateRead,
+    CompareCountsRead,
     CompareCriterionRead,
     CompareJobRead,
     JobCompareRead,
@@ -229,6 +230,19 @@ def list_jobs(session: Session, tenant_id: int) -> list[Job]:
     return list(session.exec(statement).all())
 
 
+def candidate_counts_by_job(session: Session, tenant_id: int) -> dict[int, int]:
+    """Map job id to its number of applications for the tenant, in one query."""
+    statement = (
+        select(Application.job_id, func.count(Application.id))
+        .where(Application.tenant_id == tenant_id)
+        .group_by(Application.job_id)
+    )
+    return {
+        int(job_id): int(count)
+        for job_id, count in session.exec(statement).all()
+    }
+
+
 def get_job(session: Session, job_id: int, tenant_id: int) -> Job:
     """Retrieve a job by ID scoped to current tenant, raising NotFoundException otherwise."""
     job = session.get(Job, job_id)
@@ -242,7 +256,12 @@ def compare_job_candidates(
     tenant_id: int,
     job_id: int,
 ) -> JobCompareRead:
-    """Return the job and its analyzed candidates ordered by score (best first)."""
+    """Return every non-withdrawn application for the job, best score first.
+
+    The comparison covers the whole pipeline for the tenant's job, including
+    rejected and not-yet-analyzed applications. Unscored applications are always
+    listed last so a null score never sorts ahead of a real one.
+    """
     job = get_job(session=session, job_id=job_id, tenant_id=tenant_id)
 
     statement = (
@@ -252,18 +271,20 @@ def compare_job_candidates(
             Application.tenant_id == tenant_id,
             Application.job_id == job_id,
             Candidate.tenant_id == tenant_id,
+            Application.status != "withdrawn",
         )
-        .order_by(Application.score.desc())
+        .order_by(Application.id)
     )
     rows = session.exec(statement).all()
 
+    # A NULL score must always sort last; do it in Python so the ordering does
+    # not depend on the database's NULL semantics.
+    rows = sorted(rows, key=lambda row: (row[0].score is None, -(row[0].score or 0.0)))
+
     candidates: list[CompareCandidateRead] = []
     for application, full_name in rows:
-        # JSON columns store Python None as JSON "null", so the analysis must be
-        # filtered in Python rather than with a SQL IS NOT NULL clause.
-        if not application.analysis:
-            continue
-        bundle = application.analysis
+        # Unanalyzed applications still appear, with a null score and no detail.
+        bundle = application.analysis or {}
         analysis = bundle.get("analysis", {})
         raw_breakdown = bundle.get("breakdown", {})
         breakdown = {
@@ -288,6 +309,7 @@ def compare_job_candidates(
                 years=(analysis.get("candidate") or {}).get("total_years_experience"),
                 breakdown=breakdown,
                 criteria=criteria,
+                flags=bundle.get("flags", []),
             )
         )
 
@@ -299,4 +321,8 @@ def compare_job_candidates(
             nice_to_have_skills=job.nice_to_have_skills,
         ),
         candidates=candidates,
+        counts=CompareCountsRead(
+            total=len(candidates),
+            scored=sum(1 for candidate in candidates if candidate.score is not None),
+        ),
     )

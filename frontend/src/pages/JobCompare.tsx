@@ -95,9 +95,9 @@ export function JobCompare() {
         <Card>
           <CardContent className="flex flex-col items-center justify-center gap-2 py-12 text-center text-muted-foreground">
             <Inbox className="h-8 w-8" />
-            <p className="font-medium">No analyzed candidates yet</p>
+            <p className="font-medium">No applications yet</p>
             <p className="text-sm">
-              Analyze resumes for this job to compare candidates here.
+              Applications for this job will show up here, analyzed or not.
             </p>
           </CardContent>
         </Card>
@@ -105,9 +105,20 @@ export function JobCompare() {
     );
   }
 
-  const sortedCandidates = [...data.candidates].sort((a, b) =>
-    sortDirection === "desc" ? b.score - a.score : a.score - b.score
-  );
+  // Unscored applications (not yet analyzed) always sort last, regardless of
+  // direction, so a missing score never outranks a real one.
+  const sortedCandidates = [...data.candidates].sort((a, b) => {
+    if (a.score === null && b.score === null) {
+      return 0;
+    }
+    if (a.score === null) {
+      return 1;
+    }
+    if (b.score === null) {
+      return -1;
+    }
+    return sortDirection === "desc" ? b.score - a.score : a.score - b.score;
+  });
 
   const selected = (
     selectedIds ?? sortedCandidates.slice(0, MAX_SELECTED).map((c) => c.application_id)
@@ -117,7 +128,16 @@ export function JobCompare() {
     )
     .filter((c): c is CompareCandidate => Boolean(c));
 
-  const chartData = sortedCandidates.map((candidate) => ({
+  const scoredCandidates = sortedCandidates.filter(
+    (candidate): candidate is CompareCandidate & { score: number } =>
+      candidate.score !== null
+  );
+  const analyzedCandidates = sortedCandidates.filter(
+    (candidate) => candidate.criteria.length > 0
+  );
+  const hasAnyFlags = sortedCandidates.some((candidate) => candidate.flags.length > 0);
+
+  const chartData = scoredCandidates.map((candidate) => ({
     name: candidate.name,
     score: candidate.score,
   }));
@@ -149,8 +169,12 @@ export function JobCompare() {
         <h1 className="text-2xl font-semibold">{data.job.title}</h1>
         <div className="flex flex-wrap gap-x-4 gap-y-2 text-sm text-muted-foreground">
           <span className="flex items-center gap-1.5">
-            <Users className="h-3.5 w-3.5" /> {data.candidates.length} analyzed
+            <Users className="h-3.5 w-3.5" /> {data.counts.scored} scored of{" "}
+            {data.counts.total}
           </span>
+          {data.counts.scored === 0 && (
+            <span className="text-xs">None analyzed yet</span>
+          )}
           {data.job.must_have_skills.length > 0 && (
             <span className="flex flex-wrap items-center gap-1.5">
               Must-have:
@@ -190,35 +214,41 @@ export function JobCompare() {
           </Button>
         </CardHeader>
         <CardContent>
-          <div style={{ height: Math.max(220, chartData.length * 44) }}>
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart
-                data={chartData}
-                layout="vertical"
-                margin={{ top: 4, right: 40, bottom: 4, left: 8 }}
-              >
-                <XAxis type="number" domain={[0, 100]} hide />
-                <YAxis
-                  type="category"
-                  dataKey="name"
-                  width={160}
-                  tickLine={false}
-                  axisLine={false}
-                />
-                <Tooltip cursor={{ fill: "transparent" }} />
-                <Bar dataKey="score" radius={[0, 4, 4, 0]} barSize={18} fill="#0ea5e9">
-                  <LabelList
-                    dataKey="score"
-                    position="right"
-                    formatter={(value: unknown) =>
-                      typeof value === "number" ? value.toFixed(1) : String(value ?? "")
-                    }
-                    className="fill-foreground text-xs"
+          {chartData.length === 0 ? (
+            <p className="py-8 text-center text-sm text-muted-foreground">
+              No scored candidates yet. Analyze a resume to rank candidates here.
+            </p>
+          ) : (
+            <div style={{ height: Math.max(220, chartData.length * 44) }}>
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart
+                  data={chartData}
+                  layout="vertical"
+                  margin={{ top: 4, right: 40, bottom: 4, left: 8 }}
+                >
+                  <XAxis type="number" domain={[0, 100]} hide />
+                  <YAxis
+                    type="category"
+                    dataKey="name"
+                    width={160}
+                    tickLine={false}
+                    axisLine={false}
                   />
-                </Bar>
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
+                  <Tooltip cursor={{ fill: "transparent" }} />
+                  <Bar dataKey="score" radius={[0, 4, 4, 0]} barSize={18} fill="#0ea5e9">
+                    <LabelList
+                      dataKey="score"
+                      position="right"
+                      formatter={(value: unknown) =>
+                        typeof value === "number" ? value.toFixed(1) : String(value ?? "")
+                      }
+                      className="fill-foreground text-xs"
+                    />
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          )}
         </CardContent>
       </Card>
 
@@ -305,6 +335,7 @@ export function JobCompare() {
               <TableHeader>
                 <TableRow>
                   <TableHead>Candidate</TableHead>
+                  {hasAnyFlags && <TableHead>Flags</TableHead>}
                   {criterionColumns.map((column) => (
                     <TableHead key={column.criterion} className="whitespace-nowrap">
                       {column.criterion}
@@ -323,6 +354,25 @@ export function JobCompare() {
                         {candidate.name}
                       </Link>
                     </TableCell>
+                    {hasAnyFlags && (
+                      <TableCell>
+                        {candidate.flags.length === 0 ? (
+                          <span className="text-xs text-muted-foreground">—</span>
+                        ) : (
+                          <div className="flex flex-wrap gap-1">
+                            {candidate.flags.map((flag) => (
+                              <Badge
+                                key={flag}
+                                variant="destructive"
+                                className="font-normal"
+                              >
+                                {flag}
+                              </Badge>
+                            ))}
+                          </div>
+                        )}
+                      </TableCell>
+                    )}
                     {criterionColumns.map((column) => {
                       const verdict = verdictFor(candidate, column.criterion);
                       return (
@@ -363,7 +413,7 @@ export function JobCompare() {
                   Average across analyzed candidates
                 </p>
                 <p className="text-lg font-semibold">
-                  {Math.round(averageRatio(data.candidates, kind) * 100)}%
+                  {Math.round(averageRatio(analyzedCandidates, kind) * 100)}%
                 </p>
               </div>
             ))}

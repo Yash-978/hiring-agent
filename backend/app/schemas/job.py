@@ -44,11 +44,20 @@ class CompareCandidateRead(BaseModel):
     years: float | None = None
     breakdown: dict[str, float]
     criteria: list[CompareCriterionRead]
+    flags: list[str] = []
+
+
+class CompareCountsRead(BaseModel):
+    """How many applications the comparison covers, and how many are scored."""
+
+    total: int
+    scored: int
 
 
 class JobCompareRead(BaseModel):
     job: CompareJobRead
     candidates: list[CompareCandidateRead]
+    counts: CompareCountsRead
 
 
 class JobRead(BaseModel):
@@ -61,4 +70,5 @@ class JobRead(BaseModel):
     must_have_skills: list[str] = []
     nice_to_have_skills: list[str] = []
     min_years_experience: float | None = None
+    candidate_count: int = 0
     created_at: datetime

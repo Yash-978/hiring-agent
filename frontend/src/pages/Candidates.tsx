@@ -356,6 +356,9 @@ export function Candidates() {
                 <Link to={`/jobs/${job.id}/compare`}>
                   <BarChart3 className="mr-2 h-4 w-4" />
                   Compare: {job.title}
+                  <Badge variant="secondary" className="ml-2 font-normal">
+                    {job.candidate_count}
+                  </Badge>
                 </Link>
               </Button>
             ))}

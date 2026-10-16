@@ -41,7 +41,16 @@ def list_jobs(
         session=session,
         tenant_id=current_user.tenant_id,
     )
-    return [JobRead.model_validate(j) for j in jobs]
+    counts = job_service.candidate_counts_by_job(
+        session=session,
+        tenant_id=current_user.tenant_id,
+    )
+    return [
+        JobRead.model_validate(job).model_copy(
+            update={"candidate_count": counts.get(job.id, 0)}
+        )
+        for job in jobs
+    ]
 
 
 @router.get("/{id}", response_model=JobRead)
@@ -56,7 +65,13 @@ def get_job(
         job_id=id,
         tenant_id=current_user.tenant_id,
     )
-    return JobRead.model_validate(job)
+    counts = job_service.candidate_counts_by_job(
+        session=session,
+        tenant_id=current_user.tenant_id,
+    )
+    return JobRead.model_validate(job).model_copy(
+        update={"candidate_count": counts.get(job.id, 0)}
+    )
 
 
 @router.patch("/{id}", response_model=JobRead)
