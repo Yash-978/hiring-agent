@@ -27,7 +27,7 @@ class CompareCriterionRead(BaseModel):
 class CompareCandidateRead(BaseModel):
     application_id: int
     name: str
-    score: float
+    score: float | None
     recommendation: str
     confidence: str
     years: float | None = None

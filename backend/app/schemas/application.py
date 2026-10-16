@@ -58,7 +58,7 @@ class ApplicationAnalysisRead(BaseModel):
     job: AnalysisJobRef
     candidate: AnalysisCandidateRead
     criteria: list[AnalysisCriterionRead]
-    score: float
+    score: float | None
     breakdown: dict[str, AnalysisBreakdownEntry]
     strengths: list[str]
     concerns: list[str]

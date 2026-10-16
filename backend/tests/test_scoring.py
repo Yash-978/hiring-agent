@@ -8,9 +8,12 @@ These tests pin down the three rules that matter:
 """
 
 from app.agents.scoring import (
+    MULTIPLE_MUST_HAVE_MISS_CAP,
+    ONE_MUST_HAVE_MISS_CAP,
     VERDICT_POINTS,
     WEIGHTS,
     compute_score,
+    experience_ratio,
     verify_evidence,
 )
 
@@ -162,3 +165,122 @@ def test_empty_criteria_scores_zero() -> None:
 def test_verdict_points_match_documented_values() -> None:
     assert VERDICT_POINTS == {"met": 1.0, "partial": 0.5, "not_met": 0.0, "unknown": 0.0}
     assert WEIGHTS == {"must_have": 0.70, "nice_to_have": 0.20, "experience": 0.10}
+
+
+# ---------------------------------------------------------------------------
+# experience_ratio: experience is computed in code, not by the LLM
+# ---------------------------------------------------------------------------
+
+
+def test_experience_ratio_clamps_to_one_when_over_minimum() -> None:
+    assert experience_ratio(5.0, 3.0) == 1.0
+
+
+def test_experience_ratio_is_proportional_below_minimum() -> None:
+    assert experience_ratio(1.5, 3.0) == 0.5
+
+
+def test_experience_ratio_without_minimum_is_none() -> None:
+    assert experience_ratio(5.0, None) is None
+    assert experience_ratio(5.0, 0.0) is None
+
+
+def test_experience_ratio_with_unknown_years_is_zero() -> None:
+    # No stated years never earns credit.
+    assert experience_ratio(None, 3.0) == 0.0
+
+
+# ---------------------------------------------------------------------------
+# compute_score: the experience override always counts
+# ---------------------------------------------------------------------------
+
+
+def test_experience_override_replaces_llm_experience_verdict() -> None:
+    criteria = [
+        _crit("must_have", "met", True),
+        _crit("experience", "met", True),  # the LLM's generous judgement
+    ]
+    # Code says the candidate has no experience, so the override wins.
+    result = compute_score(criteria, experience_override=0.0)
+    assert result["breakdown"]["experience"]["ratio"] == 0.0
+    # Weights are re-normalized over the kinds that count: used = 0.80,
+    # total = 0.70*1 + 0.10*0 = 0.70 -> 0.70/0.80 = 87.5
+    assert result["score"] == 87.5
+
+
+def test_experience_override_counts_even_without_experience_criteria() -> None:
+    criteria = [_crit("must_have", "met", True)]
+    result = compute_score(criteria, experience_override=1.0)
+    assert set(result["breakdown"]) == {"must_have", "experience"}
+    assert result["breakdown"]["experience"]["count"] == 1
+    # total = 0.70*1 + 0.10*1 = 0.80 ; used = 0.80 -> 100.0
+    assert result["score"] == 100.0
+
+
+def test_omitting_the_override_keeps_the_old_behaviour() -> None:
+    criteria = [_crit("must_have", "met", True)]
+    result = compute_score(criteria)
+    assert set(result["breakdown"]) == {"must_have"}
+    assert result["score"] == 100.0
+
+
+# ---------------------------------------------------------------------------
+# compute_score: hard gaps on must-haves cap the score
+# ---------------------------------------------------------------------------
+
+
+def test_one_missed_must_have_caps_the_score() -> None:
+    criteria = [
+        _crit("must_have", "met", True),
+        _crit("must_have", "met", True),
+        _crit("must_have", "met", True),
+        _crit("must_have", "met", True),
+        _crit("must_have", "not_met", True),
+        _crit("nice_to_have", "met", True),
+        _crit("experience", "met", True),
+    ]
+    # ratio = 4/5 ; total = 0.8*0.70 + 0.20 + 0.10 = 0.86 -> 86.0, capped to 79.
+    result = compute_score(criteria)
+    assert result["score"] == ONE_MUST_HAVE_MISS_CAP == 79.0
+
+
+def test_two_missed_must_haves_cap_the_score_harder() -> None:
+    criteria = [
+        _crit("must_have", "met", True),
+        _crit("must_have", "met", True),
+        _crit("must_have", "met", True),
+        _crit("must_have", "met", True),
+        _crit("must_have", "met", True),
+        _crit("must_have", "not_met", True),
+        _crit("must_have", "not_met", True),
+        _crit("nice_to_have", "met", True),
+        _crit("experience", "met", True),
+    ]
+    # 5/7*0.70 + 0.20 + 0.10 = 0.80 -> 80.0, capped to 59.
+    assert compute_score(criteria)["score"] == MULTIPLE_MUST_HAVE_MISS_CAP == 59.0
+
+
+def test_a_single_miss_below_the_cap_is_untouched() -> None:
+    criteria = [
+        _crit("must_have", "met", True),
+        _crit("must_have", "not_met", True),
+        _crit("nice_to_have", "met", True),
+        _crit("experience", "met", True),
+    ]
+    # 0.5*0.70 + 0.20 + 0.10 = 0.65 -> 65.0, already below the 79 cap.
+    assert compute_score(criteria)["score"] == 65.0
+
+
+def test_unverified_positive_must_have_is_unknown_not_a_miss() -> None:
+    # A positive verdict without evidence becomes unknown, which is not a hard
+    # gap, so it never triggers the cap.
+    criteria = [
+        _crit("must_have", "met", True),
+        _crit("must_have", "met", False),  # -> unknown
+        _crit("must_have", "met", False),  # -> unknown
+        _crit("nice_to_have", "met", True),
+        _crit("experience", "met", True),
+    ]
+    result = compute_score(criteria)
+    # 1/3*0.70 + 0.20 + 0.10 = 0.5333 -> 53.3 ; no not_met, so no cap.
+    assert result["score"] == 53.3

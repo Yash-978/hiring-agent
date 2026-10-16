@@ -192,7 +192,7 @@ def test_analyze_application_extracts_job_requirements_when_empty(
     filled = client.get(
         f"/jobs/{job['id']}", headers=tenant_a["headers"]
     ).json()
-    assert filled["must_have_skills"] == ["Python", "FastAPI"]
+    assert filled["must_have_skills"] == ["Python", "FastAPI", "PostgreSQL"]
     assert filled["nice_to_have_skills"] == ["Docker"]
     assert filled["min_years_experience"] == 3.0
 
@@ -304,7 +304,7 @@ def test_compare_job_candidates_includes_only_analyzed(
 
     assert data["job"]["id"] == job["id"]
     assert data["job"]["title"] == "Backend Engineer"
-    assert data["job"]["must_have_skills"] == ["Python", "FastAPI"]
+    assert data["job"]["must_have_skills"] == ["Python", "FastAPI", "PostgreSQL"]
     assert data["job"]["nice_to_have_skills"] == ["Docker"]
 
     assert len(data["candidates"]) == 1

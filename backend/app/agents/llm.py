@@ -42,7 +42,7 @@ class FakeLLMClient(LLMClient):
         if schema.__name__ == "JobRequirements":
             return schema.model_validate(
                 {
-                    "must_have_skills": ["Python", "FastAPI"],
+                    "must_have_skills": ["Python", "FastAPI", "PostgreSQL"],
                     "nice_to_have_skills": ["Docker"],
                     "min_years_experience": 3.0,
                 }

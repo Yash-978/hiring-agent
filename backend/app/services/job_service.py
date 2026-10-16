@@ -116,7 +116,7 @@ def compare_job_candidates(
             CompareCandidateRead(
                 application_id=application.id,
                 name=full_name,
-                score=float(application.score or 0.0),
+                score=application.score,
                 recommendation=analysis.get("recommendation", ""),
                 confidence=analysis.get("confidence", ""),
                 years=(analysis.get("candidate") or {}).get("total_years_experience"),

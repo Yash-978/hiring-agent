@@ -14,9 +14,14 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field
 
 from app.agents.llm import LLMClient, LLMError
-from app.agents.scoring import compute_score, verify_evidence
+from app.agents.scoring import compute_score, experience_ratio, verify_evidence
 
-PROMPT_VERSION = "resume_analysis_v1"
+PROMPT_VERSION = "resume_analysis_v2"
+
+# A job needs at least this many structured must-have skills before we can
+# score candidates against it. Below the floor the score is left null and the
+# reviewer is asked for more information instead of trusting a made-up score.
+MIN_MUST_HAVE = 3
 
 CriterionKind = Literal["must_have", "nice_to_have", "experience"]
 Verdict = Literal["met", "partial", "not_met", "unknown"]
@@ -64,7 +69,7 @@ class ResumeAnalysisResult(BaseModel):
     """Analysis plus the deterministic score and metadata computed by us."""
 
     analysis: ResumeAnalysis
-    score: float
+    score: float | None
     breakdown: dict[str, Any] = Field(default_factory=dict)
     flags: list[str] = Field(default_factory=list)
     model: str
@@ -83,6 +88,13 @@ SYSTEM_PROMPT = (
     "- Produce one criterion per requirement with kind must_have, "
     "nice_to_have or experience and a verdict of met, partial, not_met or "
     "unknown.\n"
+    "- Verdicts mean exactly this: met = the resume clearly shows the "
+    "requirement is satisfied; partial = the resume shows some, but "
+    "incomplete, evidence; not_met = the resume clearly shows the requirement "
+    "is not satisfied or the skill is absent; unknown = the resume does not "
+    "contain enough information to judge. Be skeptical: never upgrade a "
+    "requirement to met without direct evidence, and prefer not_met over "
+    "unknown when the resume is clearly about a different field.\n"
     "- Copy a short evidence quote of at most 25 words from the resume that "
     "supports a positive verdict. If there is no supporting text, use "
     "\"none\". Never invent evidence.\n"
@@ -176,8 +188,32 @@ def analyze_resume(
     for criterion in analysis.criteria:
         criterion.evidence_verified = verify_evidence(criterion.evidence, resume_text)
 
-    scored = compute_score([criterion.model_dump() for criterion in analysis.criteria])
     flags = _detect_flags(analysis.candidate, candidate_name, candidate_email)
+
+    # Without enough structured must-have requirements there is nothing fair to
+    # score against, so we refuse to invent a number and ask for more info.
+    must_have_count = len([s for s in (must_have_skills or []) if s.strip()])
+    if must_have_count < MIN_MUST_HAVE:
+        flags.append("insufficient_job_requirements")
+        analysis.recommendation = "needs_more_info"
+        return ResumeAnalysisResult(
+            analysis=analysis,
+            score=None,
+            breakdown={},
+            flags=flags,
+            model=client.model_name,
+            prompt_version=PROMPT_VERSION,
+        )
+
+    # Experience is computed in code from the resume years and the job minimum;
+    # the LLM never gets to award itself the experience points.
+    override = experience_ratio(
+        analysis.candidate.total_years_experience, min_years_experience
+    )
+    scored = compute_score(
+        [criterion.model_dump() for criterion in analysis.criteria],
+        experience_override=override,
+    )
 
     return ResumeAnalysisResult(
         analysis=analysis,

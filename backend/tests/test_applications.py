@@ -267,7 +267,7 @@ def test_analyze_application_success(
     assert len(approvals) == 1
     payload = approvals[0].payload
     assert payload["score"] == 90.0
-    assert payload["prompt_version"] == "resume_analysis_v1"
+    assert payload["prompt_version"] == "resume_analysis_v2"
     assert payload["model"] == "fake"
     assert payload["flags"] == []
     assert payload["breakdown"]["must_have"]["ratio"] == 1.0
@@ -280,7 +280,7 @@ def test_analyze_application_success(
     assert stored is not None
     assert stored.analysis is not None
     assert stored.analysis["score"] == 90.0
-    assert stored.analysis["prompt_version"] == "resume_analysis_v1"
+    assert stored.analysis["prompt_version"] == "resume_analysis_v2"
     assert stored.analysis["model"] == "fake"
     assert stored.analysis["flags"] == []
     assert stored.analysis["breakdown"]["must_have"]["ratio"] == 1.0
@@ -300,7 +300,7 @@ def test_analyze_application_success(
         )
     ).all()
     actions = {a.action for a in audits}
-    assert "analyze_resume" in actions
+    assert "analysis_completed" in actions
     assert "create_application" in actions
     # Check agent audit
     agent_audit = next(
@@ -309,7 +309,9 @@ def test_analyze_application_success(
     )
     assert agent_audit.actor_name == "resume_agent"
     assert agent_audit.details["score"] == 90.0
-    assert agent_audit.details["recommendation"] == "shortlist"
+    assert agent_audit.details["model"] == "fake"
+    assert agent_audit.details["criteria_count"] == 4
+    assert len(agent_audit.details["resume_sha8"]) == 8
 
 
 def test_analyze_application_bad_file_type(
@@ -498,7 +500,7 @@ def test_get_application_audit_happy_path(
     assert len(audits) >= 2
     actions = {a["action"] for a in audits}
     assert "create_application" in actions
-    assert "analyze_resume" in actions
+    assert "analysis_completed" in actions
     # Check ordering: oldest first (created_at asc)
     created_times = [a["created_at"] for a in audits]
     assert created_times == sorted(created_times)
@@ -809,7 +811,7 @@ def test_get_application_analysis_happy_path(
     assert data["confidence"] == "medium"
     assert data["flags"] == []
     assert data["model"] == "fake"
-    assert data["prompt_version"] == "resume_analysis_v1"
+    assert data["prompt_version"] == "resume_analysis_v2"
     assert data["resume_available"] is True
 
 

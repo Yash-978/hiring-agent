@@ -1,4 +1,5 @@
 from pathlib import Path
+import hashlib
 
 from sqlmodel import Session, select
 
@@ -195,7 +196,7 @@ def build_analysis_read(
             AnalysisCriterionRead(**criterion)
             for criterion in analysis.get("criteria", [])
         ],
-        score=float(bundle.get("score", 0.0)),
+        score=bundle.get("score"),
         breakdown=bundle.get("breakdown", {}),
         strengths=analysis.get("strengths", []),
         concerns=analysis.get("concerns", []),
@@ -332,14 +333,14 @@ def analyze_application(
 
     # Update application with the deterministic score and a short reasoning line
     application.status = ApplicationStatus.ANALYZED.value
-    application.score = float(result.score)
+    application.score = result.score
     application.score_reasoning = (
         f"{analysis.recommendation} (confidence: {analysis.confidence})"
     )
     session.add(application)
 
     # Create pending shortlist approval carrying the full analysis bundle
-    approval = request_approval(
+    request_approval(
         session=session,
         tenant_id=tenant_id,
         action_type=ApprovalActionType.SHORTLIST,
@@ -350,20 +351,20 @@ def analyze_application(
     )
 
     # Log audit for agent analysis (never log resume text or salaries)
+    resume_sha8 = hashlib.sha256(resume_text.encode("utf-8")).hexdigest()[:8]
     log_event(
         session=session,
         tenant_id=tenant_id,
         actor_type=AuditActorType.AGENT,
         actor_name="resume_agent",
-        action="analyze_resume",
+        action="analysis_completed",
         entity_type="application",
         entity_id=application.id,
         details={
             "score": result.score,
-            "recommendation": analysis.recommendation,
-            "confidence": analysis.confidence,
-            "flags": result.flags,
-            "approval_id": approval.id,
+            "model": result.model,
+            "criteria_count": len(analysis.criteria),
+            "resume_sha8": resume_sha8,
         },
     )
 
