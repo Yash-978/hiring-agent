@@ -33,11 +33,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const register = async (companyName: string, email: string, password: string) => {
-    const tokenResponse: TokenResponse = await registerTenant({
-      company_name: companyName,
+    const tokenResponse: TokenResponse = await registerTenant(
+      companyName,
       email,
       password,
-    });
+    );
     setToken(tokenResponse.access_token);
     const userData = await apiRequest<User>("/auth/me");
     setUser(userData);

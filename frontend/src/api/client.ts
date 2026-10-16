@@ -130,13 +130,36 @@ export async function login(email: string, password: string): Promise<TokenRespo
   return handleResponse<TokenResponse>(response);
 }
 
-export async function registerTenant(data: RegisterTenantRequest): Promise<TokenResponse> {
-  return apiRequest<TokenResponse>("/auth/register-tenant", {
+// export async function registerTenant(data: RegisterTenantRequest): Promise<TokenResponse> {
+//   return apiRequest<TokenResponse>("/auth/register-tenant", {
+//     method: "POST",
+//     body: JSON.stringify(data),
+//   });
+// }
+export async function registerTenant(
+  companyName: string,
+  email: string,
+  password: string,
+): Promise<TokenResponse> {
+  const baseUrl: string = import.meta.env.VITE_API_URL ?? "http://localhost:8000";
+  const response = await fetch(`${baseUrl}/auth/register-tenant`, {
     method: "POST",
-    body: JSON.stringify(data),
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ company_name: companyName, email, password }),
   });
+  if (!response.ok) {
+    let message = "Registration failed";
+    try {
+      const body = await response.json();
+      if (typeof body.detail === "string") message = body.detail;
+      else if (Array.isArray(body.detail) && body.detail[0]?.msg) message = body.detail[0].msg;
+    } catch {
+      // keep the default message
+    }
+    throw new Error(message);
+  }
+  return (await response.json()) as TokenResponse;
 }
-
 export async function approveApproval(id: number, note?: string): Promise<ApprovalRead> {
   return apiRequest<ApprovalRead>(`/approvals/${id}/approve`, {
     method: "POST",
