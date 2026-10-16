@@ -1,5 +1,5 @@
 import { API_URL, ApiError, apiRequest, clearToken, getToken } from "./client";
-import type { ApplicationAnalysis } from "./types";
+import type { ApplicationAnalysis, JobComparison } from "./types";
 
 export interface ResumeFile {
   blob: Blob;
@@ -11,6 +11,10 @@ export function getApplicationAnalysis(
   applicationId: number
 ): Promise<ApplicationAnalysis> {
   return apiRequest<ApplicationAnalysis>(`/applications/${applicationId}/analysis`);
+}
+
+export function getJobComparison(jobId: number): Promise<JobComparison> {
+  return apiRequest<JobComparison>(`/jobs/${jobId}/compare`);
 }
 
 export async function getApplicationResume(

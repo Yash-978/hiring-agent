@@ -5,6 +5,7 @@ import { ErrorBoundary } from "./components/ErrorBoundary";
 import { Login } from "./pages/Login";
 import { Candidates } from "./pages/Candidates";
 import { CandidateDetail } from "./pages/CandidateDetail";
+import { JobCompare } from "./pages/JobCompare";
 import { ApprovalsPage } from "./pages/ApprovalsPage";
 
 export function App() {
@@ -16,6 +17,7 @@ export function App() {
           <Route element={<AppLayout />}>
             <Route path="/candidates" element={<Candidates />} />
             <Route path="/candidates/:id" element={<CandidateDetail />} />
+            <Route path="/jobs/:id/compare" element={<JobCompare />} />
             <Route path="/approvals" element={<ApprovalsPage />} />
           </Route>
         </Route>

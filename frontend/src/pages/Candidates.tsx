@@ -9,7 +9,8 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Plus, Loader2, FileText, AlertCircle } from "lucide-react";
+import { Plus, Loader2, FileText, AlertCircle, BarChart3 } from "lucide-react";
+import { Link } from "react-router-dom";
 import { toast } from "sonner";
 import { apiRequest, apiUpload, type Application, type Job, type CandidateCreate, type ApplicationCreate, type JobCreate } from "@/api/client";
 
@@ -344,6 +345,23 @@ export function Candidates() {
           <NewCandidateDialog onSuccess={handleSuccess} jobs={jobs ?? []} />
         </div>
       </div>
+      {jobs?.length ? (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Compare candidates by job</CardTitle>
+          </CardHeader>
+          <CardContent className="flex flex-wrap gap-2">
+            {jobs.map((job) => (
+              <Button key={job.id} variant="outline" size="sm" asChild>
+                <Link to={`/jobs/${job.id}/compare`}>
+                  <BarChart3 className="mr-2 h-4 w-4" />
+                  Compare: {job.title}
+                </Link>
+              </Button>
+            ))}
+          </CardContent>
+        </Card>
+      ) : null}
       <Card>
         <CardContent>
           {!applications?.length ? (
