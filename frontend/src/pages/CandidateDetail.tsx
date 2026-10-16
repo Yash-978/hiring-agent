@@ -14,6 +14,7 @@ import { ArrowLeft, Brain, Shield, User, FileText, AlertTriangle, CheckCircle, X
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
 import { apiRequest, getApplicationAudit, createOfferDraft, downloadLetter, type Application, type Approval, type AuditLogRead, type Letter } from "@/api/client";
+import { AnalysisView } from "@/components/AnalysisView";
 
 const statusColors: Record<string, "default" | "secondary" | "destructive" | "outline"> = {
   new: "default",
@@ -620,6 +621,8 @@ export function CandidateDetail() {
           <AuditTimeline auditLogs={auditLogs ?? []} />
         </CardContent>
       </Card>
+
+      <AnalysisView applicationId={application.id} />
 
       <Dialog open={showOfferForm} onOpenChange={setShowOfferForm}>
         <DialogContent className="sm:max-w-[500px]">
