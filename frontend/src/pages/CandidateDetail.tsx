@@ -15,6 +15,7 @@ import { Link } from "react-router-dom";
 import { toast } from "sonner";
 import { apiRequest, getApplicationAudit, createOfferDraft, downloadLetter, type Application, type Approval, type AuditLogRead, type Letter } from "@/api/client";
 import { AnalysisView } from "@/components/AnalysisView";
+import { ResumePanel } from "@/components/ResumePanel";
 
 const statusColors: Record<string, "default" | "secondary" | "destructive" | "outline"> = {
   new: "default",
@@ -623,6 +624,8 @@ export function CandidateDetail() {
       </Card>
 
       <AnalysisView applicationId={application.id} />
+
+      <ResumePanel applicationId={application.id} />
 
       <Dialog open={showOfferForm} onOpenChange={setShowOfferForm}>
         <DialogContent className="sm:max-w-[500px]">
