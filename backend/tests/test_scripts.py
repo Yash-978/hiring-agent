@@ -91,7 +91,7 @@ def test_try_resume_run_returns_analysis_without_saving(session: Session) -> Non
     assert "analysis" in result
     assert "score" in result and "breakdown" in result
     assert result["model"] == "fake"
-    assert result["analysis"]["candidate"]["full_name"] == "Alice Smith"
+    assert result["analysis"]["candidate"]["full_name"] == "Jordan Reyes"
 
     # Nothing was written: no audit rows, the job keeps its empty requirements
     # and the candidate's resume_text is untouched.

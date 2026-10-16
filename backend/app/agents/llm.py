@@ -1,5 +1,6 @@
 """LLM client protocol and implementations."""
 
+import re
 from abc import ABC, abstractmethod
 from typing import TypeVar
 
@@ -30,8 +31,145 @@ class LLMClient(ABC):
         pass
 
 
+# --- Deterministic helpers for the fake client ------------------------------
+#
+# The fake client is a keyword judge: it reads the structured requirements and
+# the resume text straight out of the analysis prompt and judges each skill by
+# looking for it in the resume. That keeps the offline demo mode honest and
+# makes the tests exercise the same scoring path as a real model would, without
+# a network call.
+
+_EMAIL_RE = re.compile(r"[\w.+-]+@[\w-]+\.[\w.-]+")
+_YEARS_RE = re.compile(r"(\d+(?:\.\d+)?)\s*\+?\s*years?", re.IGNORECASE)
+_SKILL_LIST_SEPARATORS = (",", "|", ";", "•", "·", "/")
+
+
+def _prompt_skill_list(prompt: str, label: str) -> list[str]:
+    """Read a 'Label: a, b, c' line out of an analysis prompt."""
+    for line in prompt.splitlines():
+        if line.startswith(label):
+            body = line[len(label):]
+            return [item.strip() for item in body.split(",") if item.strip()]
+    return []
+
+
+def _resume_body(prompt: str) -> str:
+    """Return the resume text between the untrusted-data delimiters."""
+    if "<<<RESUME>>>" not in prompt:
+        return ""
+    return prompt.split("<<<RESUME>>>", 1)[1].split("<<<END_RESUME>>>", 1)[0]
+
+
+def _looks_like_skills_list(line: str) -> bool:
+    """True for a bare skills list, false for prose that happens to name a skill."""
+    stripped = line.strip()
+    if any(punctuation in stripped for punctuation in ".!?"):
+        return False
+    if len(stripped.split()) > 8:
+        return False
+    return any(separator in stripped for separator in _SKILL_LIST_SEPARATORS)
+
+
+def _snippet_around(line: str, needle: str, max_words: int = 25) -> str:
+    """A short contiguous quote from the line that still contains the needle."""
+    words = line.split()
+    target = needle.lower()
+    index = next((i for i, word in enumerate(words) if target in word.lower()), None)
+    if index is None:
+        return " ".join(words[:max_words])
+    half = max_words // 2
+    start = max(0, index - half)
+    end = min(len(words), start + max_words)
+    start = max(0, end - max_words)
+    return " ".join(words[start:end])
+
+
+def _judge_skill(skill: str, resume_text: str) -> tuple[str, str, str]:
+    """Judge one skill from the resume, returning (verdict, evidence, note)."""
+    for line in resume_text.splitlines():
+        if skill.lower() in line.lower():
+            evidence = _snippet_around(line, skill)
+            if _looks_like_skills_list(line):
+                return "partial", evidence, f"{skill} appears only in a skills list."
+            return "met", evidence, f"{skill} is evidenced in the resume."
+    return "not_met", "none", f"No evidence of {skill} in the resume."
+
+
+def _extract_candidate(resume_text: str) -> dict:
+    """Best-effort deterministic candidate details from the resume text."""
+    full_name: str | None = None
+    for raw_line in resume_text.splitlines():
+        line = raw_line.strip()
+        if not line or "@" in line or any(ch.isdigit() for ch in line):
+            continue
+        if 0 < len(line.split()) <= 5:
+            full_name = line
+            break
+    email_match = _EMAIL_RE.search(resume_text)
+    years_match = _YEARS_RE.search(resume_text)
+    return {
+        "full_name": full_name,
+        "email": email_match.group(0) if email_match else None,
+        "phone": None,
+        "location": None,
+        "current_title": None,
+        "total_years_experience": float(years_match.group(1)) if years_match else None,
+        "education": [],
+        "skills": [],
+    }
+
+
+def _resume_analysis_payload(prompt: str) -> dict:
+    """Build a deterministic ResumeAnalysis payload from the prompt."""
+    resume_text = _resume_body(prompt)
+    criteria: list[dict] = []
+    for skill in _prompt_skill_list(prompt, "Must-have skills: "):
+        verdict, evidence, note = _judge_skill(skill, resume_text)
+        criteria.append(
+            {
+                "criterion": skill,
+                "kind": "must_have",
+                "verdict": verdict,
+                "evidence": evidence,
+                "note": note,
+            }
+        )
+    for skill in _prompt_skill_list(prompt, "Nice-to-have skills: "):
+        verdict, evidence, note = _judge_skill(skill, resume_text)
+        criteria.append(
+            {
+                "criterion": skill,
+                "kind": "nice_to_have",
+                "verdict": verdict,
+                "evidence": evidence,
+                "note": note,
+            }
+        )
+
+    must = [c for c in criteria if c["kind"] == "must_have"]
+    if not must:
+        recommendation, confidence = "needs_more_info", "low"
+    elif not any(c["verdict"] == "met" for c in must):
+        recommendation, confidence = "reject", "low"
+    elif all(c["verdict"] == "met" for c in must):
+        recommendation = "shortlist"
+        confidence = "high" if all(c["verdict"] == "met" for c in criteria) else "medium"
+    else:
+        recommendation, confidence = "needs_more_info", "low"
+
+    return {
+        "candidate": _extract_candidate(resume_text),
+        "criteria": criteria,
+        "strengths": [c["criterion"] for c in criteria if c["verdict"] == "met"],
+        "concerns": [c["criterion"] for c in criteria if c["verdict"] != "met"],
+        "questions_for_candidate": [],
+        "recommendation": recommendation,
+        "confidence": confidence,
+    }
+
+
 class FakeLLMClient(LLMClient):
-    """Deterministic fake client for testing."""
+    """Deterministic keyword judge used for tests and the offline demo mode."""
 
     model_name: str = "fake"
 
@@ -48,55 +186,7 @@ class FakeLLMClient(LLMClient):
                 }
             )
         if schema.__name__ == "ResumeAnalysis":
-            return schema.model_validate(
-                {
-                    "candidate": {
-                        "full_name": "Alice Smith",
-                        "email": "alice@example.com",
-                        "phone": None,
-                        "location": None,
-                        "current_title": "Backend Engineer",
-                        "total_years_experience": 5.0,
-                        "education": ["BSc Computer Science"],
-                        "skills": ["Python", "FastAPI", "Docker"],
-                    },
-                    "criteria": [
-                        {
-                            "criterion": "Python",
-                            "kind": "must_have",
-                            "verdict": "met",
-                            "evidence": "Python and FastAPI",
-                            "note": "Uses Python daily.",
-                        },
-                        {
-                            "criterion": "FastAPI",
-                            "kind": "must_have",
-                            "verdict": "met",
-                            "evidence": "Python and FastAPI",
-                            "note": "Built FastAPI services.",
-                        },
-                        {
-                            "criterion": "Docker",
-                            "kind": "nice_to_have",
-                            "verdict": "partial",
-                            "evidence": "Docker",
-                            "note": "Some Docker exposure.",
-                        },
-                        {
-                            "criterion": "5 years of experience",
-                            "kind": "experience",
-                            "verdict": "met",
-                            "evidence": "5 years Python",
-                            "note": "Meets the minimum.",
-                        },
-                    ],
-                    "strengths": ["Strong Python skills"],
-                    "concerns": ["Limited Kubernetes experience"],
-                    "questions_for_candidate": ["Describe your largest FastAPI project."],
-                    "recommendation": "shortlist",
-                    "confidence": "medium",
-                }
-            )
+            return schema.model_validate(_resume_analysis_payload(prompt))
         if schema.__name__ == "OfferDraft":
             return schema.model_validate(
                 {

@@ -251,8 +251,8 @@ def test_analyze_application_success(
     data = resp.json()
     assert data["id"] == app_id
     assert data["status"] == "analyzed"
-    assert data["score"] == 90.0
-    assert data["score_reasoning"] == "shortlist (confidence: medium)"
+    assert data["score"] == 100.0
+    assert data["score_reasoning"] == "shortlist (confidence: high)"
 
     # Verify exactly one pending shortlist approval was created
     approvals = session.exec(
@@ -266,7 +266,7 @@ def test_analyze_application_success(
     ).all()
     assert len(approvals) == 1
     payload = approvals[0].payload
-    assert payload["score"] == 90.0
+    assert payload["score"] == 100.0
     assert payload["prompt_version"] == "resume_analysis_v2"
     assert payload["model"] == "fake"
     assert payload["flags"] == []
@@ -279,7 +279,7 @@ def test_analyze_application_success(
     stored = session.get(Application, app_id)
     assert stored is not None
     assert stored.analysis is not None
-    assert stored.analysis["score"] == 90.0
+    assert stored.analysis["score"] == 100.0
     assert stored.analysis["prompt_version"] == "resume_analysis_v2"
     assert stored.analysis["model"] == "fake"
     assert stored.analysis["flags"] == []
@@ -308,7 +308,7 @@ def test_analyze_application_success(
         if (a.actor_type.value if hasattr(a.actor_type, "value") else a.actor_type) == "agent"
     )
     assert agent_audit.actor_name == "resume_agent"
-    assert agent_audit.details["score"] == 90.0
+    assert agent_audit.details["score"] == 100.0
     assert agent_audit.details["model"] == "fake"
     assert agent_audit.details["criteria_count"] == 4
     assert len(agent_audit.details["resume_sha8"]) == 8
@@ -678,8 +678,9 @@ def test_analyze_application_unverified_evidence_counts_as_unknown(
     assert approval is not None
     payload = approval.payload
     assert payload["analysis"]["criteria"][0]["evidence_verified"] is False
-    # Unverified positive verdict is treated as unknown: 55.0 not 90.0.
-    assert payload["score"] == 55.0
+    # An unverified positive verdict is treated as unknown, so Python scores 0
+    # and the must-have ratio drops to 2/3 instead of the full 100.
+    assert payload["score"] == 76.7
 
 
 def test_analyze_application_ignores_client_filename(
@@ -798,17 +799,17 @@ def test_get_application_analysis_happy_path(
     assert data["candidate"]["email"] == "alice@example.com"
     assert data["candidate"]["total_years_experience"] == 5.0
 
-    assert data["score"] == 90.0
+    assert data["score"] == 100.0
     assert data["breakdown"]["must_have"]["ratio"] == 1.0
-    assert data["breakdown"]["must_have"]["count"] == 2
-    assert data["breakdown"]["nice_to_have"]["ratio"] == 0.5
+    assert data["breakdown"]["must_have"]["count"] == 3
+    assert data["breakdown"]["nice_to_have"]["ratio"] == 1.0
 
     assert len(data["criteria"]) == 4
     assert data["criteria"][0]["criterion"] == "Python"
     assert data["criteria"][0]["evidence_verified"] is True
 
     assert data["recommendation"] == "shortlist"
-    assert data["confidence"] == "medium"
+    assert data["confidence"] == "high"
     assert data["flags"] == []
     assert data["model"] == "fake"
     assert data["prompt_version"] == "resume_analysis_v2"

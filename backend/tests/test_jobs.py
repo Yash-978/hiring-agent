@@ -312,7 +312,7 @@ def test_compare_job_candidates_includes_only_analyzed(
     assert candidate["application_id"] == analyzed["id"]
     assert candidate["name"] == "Alice Smith"
     assert candidate["recommendation"] == "shortlist"
-    assert candidate["confidence"] == "medium"
+    assert candidate["confidence"] == "high"
     assert set(candidate["breakdown"].keys()) == {
         "must_have",
         "nice_to_have",

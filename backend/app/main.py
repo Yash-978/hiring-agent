@@ -4,6 +4,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
+from app.config import get_settings
 from app.db import create_db_and_tables
 
 
@@ -84,3 +85,16 @@ async def approval_required_handler(
 @app.get("/health")
 def health() -> dict[str, str]:
     return {"status": "ok"}
+
+
+@app.get("/meta")
+def meta() -> dict[str, object]:
+    """Describe the active LLM provider so the UI can show demo mode."""
+    settings = get_settings()
+    provider = settings.LLM_PROVIDER
+    model = settings.GEMINI_MODEL if provider == "gemini" else "fake"
+    return {
+        "llm_provider": provider,
+        "llm_model": model,
+        "demo_mode": provider == "fake",
+    }
