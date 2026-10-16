@@ -4,6 +4,7 @@ import type { User } from "@/api/client";
 interface AuthContextType {
   user: User | null;
   login: (email: string, password: string) => Promise<void>;
+  register: (companyName: string, email: string, password: string) => Promise<void>;
   logout: () => void;
   isLoading: boolean;
 }

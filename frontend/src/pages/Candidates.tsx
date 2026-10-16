@@ -69,56 +69,54 @@ function NewJobDialog({ onSuccess }: { onSuccess: () => void }) {
   };
 
   return (
-    <>
+    <Dialog open={isOpen} onOpenChange={setIsOpen}>
       <DialogTrigger asChild>
-        <Button variant="outline" onClick={() => setIsOpen(true)}>
+        <Button variant="outline">
           <Plus className="h-4 w-4 mr-2" />
           New job
         </Button>
       </DialogTrigger>
-      <Dialog open={isOpen} onOpenChange={setIsOpen}>
-        <DialogContent className="sm:max-w-[500px]">
-          <form onSubmit={handleSubmit}>
-            <DialogHeader>
-              <DialogTitle>Create new job</DialogTitle>
-            </DialogHeader>
-            <DialogContent className="grid gap-4 py-4">
-              <div className="grid gap-2">
-                <Label htmlFor="title">Title</Label>
-                <Input
-                  id="title"
-                  value={title}
-                  onChange={(e) => setTitle(e.target.value)}
-                  placeholder="e.g. Senior Backend Engineer"
-                  disabled={isLoading}
-                  required
-                />
-              </div>
-              <div className="grid gap-2">
-                <Label htmlFor="description">Description</Label>
-                <Input
-                  id="description"
-                  value={description}
-                  onChange={(e) => setDescription(e.target.value)}
-                  placeholder="Job description..."
-                  disabled={isLoading}
-                  required
-                />
-              </div>
-            </DialogContent>
-            <DialogFooter>
-              <Button type="button" variant="outline" onClick={() => setIsOpen(false)} disabled={isLoading}>
-                Cancel
-              </Button>
-              <Button type="submit" disabled={isLoading || !title.trim() || !description.trim()}>
-                {isLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                Create
-              </Button>
-            </DialogFooter>
-          </form>
-        </DialogContent>
-      </Dialog>
-    </>
+      <DialogContent className="sm:max-w-[500px]">
+        <form onSubmit={handleSubmit}>
+          <DialogHeader>
+            <DialogTitle>Create new job</DialogTitle>
+          </DialogHeader>
+          <div className="grid gap-4 py-4">
+            <div className="grid gap-2">
+              <Label htmlFor="title">Title</Label>
+              <Input
+                id="title"
+                value={title}
+                onChange={(e) => setTitle(e.target.value)}
+                placeholder="e.g. Senior Backend Engineer"
+                disabled={isLoading}
+                required
+              />
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="description">Description</Label>
+              <Input
+                id="description"
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
+                placeholder="Job description..."
+                disabled={isLoading}
+                required
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setIsOpen(false)} disabled={isLoading}>
+              Cancel
+            </Button>
+            <Button type="submit" disabled={isLoading || !title.trim() || !description.trim()}>
+              {isLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              Create
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -189,90 +187,88 @@ function NewCandidateDialog({ onSuccess, jobs }: NewCandidateDialogProps) {
   };
 
   return (
-    <>
+    <Dialog open={isOpen} onOpenChange={setIsOpen}>
       <DialogTrigger asChild>
-        <Button onClick={() => setIsOpen(true)}>
+        <Button>
           <Plus className="h-4 w-4 mr-2" />
           New candidate
         </Button>
       </DialogTrigger>
-      <Dialog open={isOpen} onOpenChange={setIsOpen}>
-        <DialogContent className="sm:max-w-[500px]">
-          <form onSubmit={handleSubmit}>
-            <DialogHeader>
-              <DialogTitle>Add new candidate</DialogTitle>
-            </DialogHeader>
-            <DialogContent className="grid gap-4 py-4">
-              <div className="grid gap-2">
-                <Label htmlFor="fullName">Full name</Label>
-                <Input
-                  id="fullName"
-                  value={fullName}
-                  onChange={(e) => setFullName(e.target.value)}
-                  placeholder="e.g. Alice Smith"
-                  disabled={isLoading}
-                  required
-                />
-              </div>
-              <div className="grid gap-2">
-                <Label htmlFor="email">Email</Label>
-                <Input
-                  id="email"
-                  type="email"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  placeholder="alice@example.com"
-                  disabled={isLoading}
-                  required
-                />
-              </div>
-              <div className="grid gap-2">
-                <Label htmlFor="jobId">Job</Label>
-                <Select value={jobId} onValueChange={setJobId} disabled={isLoading} required>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select a job" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {jobs.map((job) => (
-                      <SelectItem key={job.id} value={String(job.id)}>
-                        {job.title}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="grid gap-2">
-                <Label htmlFor="resume">Resume (PDF or TXT)</Label>
-                <Input
-                  id="resume"
-                  type="file"
-                  accept=".pdf,.txt"
-                  onChange={(e) => setResumeFile(e.target.files?.[0] ?? null)}
-                  disabled={isLoading}
-                  required
-                />
-                {resumeFile && (
-                  <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                    <FileText className="h-4 w-4" />
-                    <span>{resumeFile.name}</span>
-                    <span>({(resumeFile.size / 1024).toFixed(1)} KB)</span>
-                  </div>
-                )}
-              </div>
-            </DialogContent>
-            <DialogFooter>
-              <Button type="button" variant="outline" onClick={() => setIsOpen(false)} disabled={isLoading || analyzing}>
-                Cancel
-              </Button>
-              <Button type="submit" disabled={isLoading || analyzing || !fullName.trim() || !email.trim() || !jobId || !resumeFile}>
-                {analyzing && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                {analyzing ? "Analyzing..." : isLoading ? "Creating..." : "Add candidate"}
-              </Button>
-            </DialogFooter>
-          </form>
-        </DialogContent>
-      </Dialog>
-    </>
+      <DialogContent className="sm:max-w-[500px]">
+        <form onSubmit={handleSubmit}>
+          <DialogHeader>
+            <DialogTitle>Add new candidate</DialogTitle>
+          </DialogHeader>
+          <div className="grid gap-4 py-4">
+            <div className="grid gap-2">
+              <Label htmlFor="fullName">Full name</Label>
+              <Input
+                id="fullName"
+                value={fullName}
+                onChange={(e) => setFullName(e.target.value)}
+                placeholder="e.g. Alice Smith"
+                disabled={isLoading}
+                required
+              />
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="email">Email</Label>
+              <Input
+                id="email"
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="alice@example.com"
+                disabled={isLoading}
+                required
+              />
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="jobId">Job</Label>
+              <Select value={jobId} onValueChange={setJobId} disabled={isLoading} required>
+                <SelectTrigger>
+                  <SelectValue placeholder="Select a job" />
+                </SelectTrigger>
+                <SelectContent>
+                  {jobs.map((job) => (
+                    <SelectItem key={job.id} value={String(job.id)}>
+                      {job.title}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="resume">Resume (PDF or TXT)</Label>
+              <Input
+                id="resume"
+                type="file"
+                accept=".pdf,.txt"
+                onChange={(e) => setResumeFile(e.target.files?.[0] ?? null)}
+                disabled={isLoading}
+                required
+              />
+              {resumeFile && (
+                <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                  <FileText className="h-4 w-4" />
+                  <span>{resumeFile.name}</span>
+                  <span>({(resumeFile.size / 1024).toFixed(1)} KB)</span>
+                </div>
+              )}
+            </div>
+          </div>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setIsOpen(false)} disabled={isLoading || analyzing}>
+              Cancel
+            </Button>
+            <Button type="submit" disabled={isLoading || analyzing || !fullName.trim() || !email.trim() || !jobId || !resumeFile}>
+              {analyzing && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              {analyzing ? "Analyzing..." : isLoading ? "Creating..." : "Add candidate"}
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
   );
 }
 

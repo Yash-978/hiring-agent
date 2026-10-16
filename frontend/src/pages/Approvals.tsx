@@ -8,10 +8,10 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, Dialog
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Loader2, AlertCircle, CheckCircle, Clock, User, FileText, Shield, AlertTriangle } from "lucide-react";
+import { Loader2, AlertCircle, CheckCircle, Clock, User as UserIcon, FileText, Shield, AlertTriangle } from "lucide-react";
 import { toast } from "sonner";
 import { useAuth } from "@/auth/useAuth";
-import { apiRequest, approveApproval, rejectApproval, type Approval, type User } from "@/api/client";
+import { apiRequest, approveApproval, rejectApproval, type Approval } from "@/api/client";
 
 type ApprovalStatus = "pending" | "approved" | "rejected";
 
@@ -46,8 +46,27 @@ function getPayloadSummary(payload: Record<string, unknown> | null): string {
   return JSON.stringify(payload, null, 2);
 }
 
+interface ApprovalPayloadView {
+  skills?: string[];
+  reasoning?: string;
+  missing_skills?: string[];
+  letter_content?: string;
+}
+
+function getPayloadView(payload: Record<string, unknown> | null): ApprovalPayloadView {
+  if (!payload) return {};
+  return {
+    skills: Array.isArray(payload.skills) ? (payload.skills as string[]) : undefined,
+    reasoning: typeof payload.reasoning === "string" ? payload.reasoning : undefined,
+    missing_skills: Array.isArray(payload.missing_skills) ? (payload.missing_skills as string[]) : undefined,
+    letter_content: typeof payload.letter_content === "string" ? payload.letter_content : undefined,
+  };
+}
+
 function renderShortlistDetails(payload: Record<string, unknown> | null) {
   if (!payload) return <p className="text-muted-foreground text-sm">No details available</p>;
+
+  const { skills, reasoning, missing_skills: missingSkills } = getPayloadView(payload);
 
   return (
     <div className="space-y-3 text-sm">
@@ -57,11 +76,11 @@ function renderShortlistDetails(payload: Record<string, unknown> | null) {
           {typeof payload.score === "number" ? payload.score.toFixed(1) : "—"} / 10
         </p>
       </div>
-      {payload.skills && (
+      {skills && (
         <div>
           <Label className="font-medium text-muted-foreground">Matched Skills</Label>
           <div className="flex flex-wrap gap-1 mt-1">
-            {(payload.skills as string[]).map((skill) => (
+            {skills.map((skill) => (
               <Badge key={skill} variant="secondary" className="text-xs">
                 {skill}
               </Badge>
@@ -69,17 +88,17 @@ function renderShortlistDetails(payload: Record<string, unknown> | null) {
           </div>
         </div>
       )}
-      {payload.reasoning && (
+      {reasoning && (
         <div>
           <Label className="font-medium text-muted-foreground">Reasoning</Label>
-          <p className="mt-1 whitespace-pre-wrap">{payload.reasoning as string}</p>
+          <p className="mt-1 whitespace-pre-wrap">{reasoning}</p>
         </div>
       )}
-      {payload.missing_skills && (payload.missing_skills as string[]).length > 0 && (
+      {missingSkills && missingSkills.length > 0 && (
         <div>
           <Label className="font-medium text-muted-foreground">Missing Skills</Label>
           <div className="flex flex-wrap gap-1 mt-1">
-            {(payload.missing_skills as string[]).map((skill) => (
+            {missingSkills.map((skill) => (
               <Badge key={skill} variant="destructive" className="text-xs">
                 {skill}
               </Badge>
@@ -93,6 +112,8 @@ function renderShortlistDetails(payload: Record<string, unknown> | null) {
 
 function renderOfferLetterDetails(payload: Record<string, unknown> | null) {
   if (!payload) return <p className="text-muted-foreground text-sm">No details available</p>;
+
+  const { letter_content: letterContent } = getPayloadView(payload);
 
   return (
     <div className="space-y-3 text-sm">
@@ -109,12 +130,12 @@ function renderOfferLetterDetails(payload: Record<string, unknown> | null) {
           <p className="mt-1">{payload.start_date as string ?? "—"}</p>
         </div>
       </div>
-      {payload.letter_content && (
+      {letterContent && (
         <div>
           <Label className="font-medium text-muted-foreground">Letter Content</Label>
           <ScrollArea className="mt-1 h-64 border rounded-md p-3 bg-muted/50">
             <pre className="whitespace-pre-wrap text-sm font-mono">
-              {payload.letter_content as string}
+              {letterContent}
             </pre>
           </ScrollArea>
         </div>
@@ -157,7 +178,7 @@ function ApprovalCard({
             </div>
             <div className="mt-2 flex items-center gap-4 text-sm text-muted-foreground flex-wrap">
               <span className="flex items-center gap-1">
-                <User className="h-3.5 w-3.5" />
+                <UserIcon className="h-3.5 w-3.5" />
                 Requested by: {formatCreatedBy(approval.requested_by)}
               </span>
               <span className="flex items-center gap-1">
@@ -205,7 +226,7 @@ function ApprovalCard({
             </div>
             <div className="grid gap-1 text-sm text-green-700 ml-6">
               <div className="flex items-center gap-1">
-                <User className="h-3.5 w-3.5" />
+                <UserIcon className="h-3.5 w-3.5" />
                 Decided by: user #{approval.decided_by_user_id}
               </div>
               <div className="flex items-center gap-1">
@@ -467,8 +488,8 @@ function ApprovalsList({ status, currentUserRole }: { status: ApprovalStatus; cu
         <ApprovalCard
           key={approval.id}
           approval={approval}
-          onApprove={handleApprove}
-          onReject={handleReject}
+          onApprove={(note) => handleApprove(approval.id, note)}
+          onReject={(note) => handleReject(approval.id, note)}
           isApproving={approveMutation.isPending && approveMutation.variables?.id === approval.id}
           isRejecting={rejectMutation.isPending && rejectMutation.variables?.id === approval.id}
           currentUserRole={currentUserRole}

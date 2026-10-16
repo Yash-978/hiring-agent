@@ -130,6 +130,13 @@ export async function login(email: string, password: string): Promise<TokenRespo
   return handleResponse<TokenResponse>(response);
 }
 
+export async function registerTenant(data: RegisterTenantRequest): Promise<TokenResponse> {
+  return apiRequest<TokenResponse>("/auth/register-tenant", {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+}
+
 export async function approveApproval(id: number, note?: string): Promise<ApprovalRead> {
   return apiRequest<ApprovalRead>(`/approvals/${id}/approve`, {
     method: "POST",

@@ -56,8 +56,28 @@ def test_register_tenant_duplicate_email(client: TestClient) -> None:
         "password": "password456",
     }
     resp2 = client.post("/auth/register-tenant", json=payload2)
-    assert resp2.status_code == 400
+    assert resp2.status_code == 409
     assert "already registered" in resp2.json()["detail"].lower()
+
+
+def test_register_tenant_invalid_email(client: TestClient) -> None:
+    payload = {
+        "company_name": "Bad Email Corp",
+        "email": "not-an-email",
+        "password": "securepassword123",
+    }
+    response = client.post("/auth/register-tenant", json=payload)
+    assert response.status_code == 422
+
+
+def test_register_tenant_short_password(client: TestClient) -> None:
+    payload = {
+        "company_name": "Short Pass Corp",
+        "email": "shortpass@test.com",
+        "password": "short",
+    }
+    response = client.post("/auth/register-tenant", json=payload)
+    assert response.status_code == 422
 
 
 def test_login_success(client: TestClient, session: Session) -> None:
