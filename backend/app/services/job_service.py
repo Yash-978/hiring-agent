@@ -1,14 +1,61 @@
+import logging
+import re
+
+from sqlalchemy import inspect, text
+from sqlalchemy.engine import Engine
+from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 
-from app.exceptions import NotFoundException
+from app.exceptions import ConflictException, NotFoundException
 from app.models import Application, AuditActorType, Candidate, Job, JobStatus
 from app.schemas.job import (
     CompareCandidateRead,
     CompareCriterionRead,
     CompareJobRead,
     JobCompareRead,
+    JobUpdate,
 )
 from app.services.audit_service import log_event
+
+logger = logging.getLogger(__name__)
+
+# Name of the per-tenant unique index on job titles.
+JOB_TITLE_INDEX_NAME = "ix_job_tenant_title_key"
+
+_WHITESPACE_RE = re.compile(r"\s+")
+
+
+def normalize_title(title: str) -> str:
+    """Casefold and collapse whitespace so titles compare case/space-insensitively.
+
+    "  Mobile   App Developer " and "mobile app developer" both become
+    "mobile app developer".
+    """
+    return _WHITESPACE_RE.sub(" ", title.strip()).casefold()
+
+
+def _find_job_by_title_key(
+    session: Session,
+    tenant_id: int,
+    title_key: str,
+    exclude_job_id: int | None = None,
+) -> Job | None:
+    """Return an existing job in the tenant with this title key, if any."""
+    statement = select(Job).where(
+        Job.tenant_id == tenant_id,
+        Job.title_key == title_key,
+    )
+    for job in session.exec(statement).all():
+        if exclude_job_id is None or job.id != exclude_job_id:
+            return job
+    return None
+
+
+def _raise_duplicate_title(existing_job_id: int | None) -> None:
+    payload: dict[str, object] = {}
+    if existing_job_id is not None:
+        payload["existing_job_id"] = existing_job_id
+    raise ConflictException("A job with this title already exists", payload=payload)
 
 
 def create_job(
@@ -22,11 +69,21 @@ def create_job(
     min_years_experience: float | None = None,
     creator_name: str = "",
 ) -> Job:
-    """Create a new job for the tenant and log an audit entry."""
+    """Create a new job for the tenant and log an audit entry.
+
+    Raises ConflictException if the tenant already has a job with the same
+    normalized title.
+    """
     status_val = status.value if isinstance(status, JobStatus) else str(status)
+    title_key = normalize_title(title)
+    existing = _find_job_by_title_key(session, tenant_id, title_key)
+    if existing is not None:
+        _raise_duplicate_title(existing.id)
+
     job = Job(
         tenant_id=tenant_id,
         title=title,
+        title_key=title_key,
         description=description,
         status=JobStatus(status_val) if status_val in ("open", "closed") else JobStatus.OPEN,
         must_have_skills=list(must_have_skills or []),
@@ -34,7 +91,12 @@ def create_job(
         min_years_experience=min_years_experience,
     )
     session.add(job)
-    session.flush()
+    try:
+        session.flush()
+    except IntegrityError as exc:
+        # The unique index caught a concurrent insert that the pre-check missed.
+        session.rollback()
+        raise ConflictException("A job with this title already exists") from exc
 
     assert job.id is not None
     log_event(
@@ -51,6 +113,110 @@ def create_job(
     session.commit()
     session.refresh(job)
     return job
+
+
+def update_job(
+    session: Session,
+    tenant_id: int,
+    job_id: int,
+    data: JobUpdate,
+    actor_name: str = "",
+) -> Job:
+    """Apply a partial update to a tenant-scoped job and log an audit entry."""
+    job = get_job(session=session, job_id=job_id, tenant_id=tenant_id)
+    updates = data.model_dump(exclude_unset=True)
+
+    # Required-ish fields cannot be cleared with an explicit null.
+    for field in ("title", "description", "status", "must_have_skills", "nice_to_have_skills"):
+        if updates.get(field) is None:
+            updates.pop(field, None)
+
+    if "title" in updates:
+        new_key = normalize_title(str(updates["title"]))
+        existing = _find_job_by_title_key(
+            session, tenant_id, new_key, exclude_job_id=job.id
+        )
+        if existing is not None:
+            _raise_duplicate_title(existing.id)
+        job.title_key = new_key
+
+    if "status" in updates:
+        status_val = str(updates["status"])
+        job.status = JobStatus(status_val) if status_val in ("open", "closed") else job.status
+        updates.pop("status")
+
+    for field, value in updates.items():
+        setattr(job, field, value)
+
+    session.add(job)
+    session.flush()
+    log_event(
+        session=session,
+        tenant_id=tenant_id,
+        actor_type=AuditActorType.USER,
+        actor_name=actor_name or "system",
+        action="update_job",
+        entity_type="job",
+        entity_id=job.id,
+        details={"fields": sorted(updates)},
+    )
+    session.commit()
+    session.refresh(job)
+    return job
+
+
+def ensure_job_unique_index(engine: Engine) -> None:
+    """Add the job.title_key column if missing and enforce one title per tenant.
+
+    Existing rows are backfilled with their normalized title. If duplicates are
+    found, a clear warning is logged pointing at scripts/dedupe_jobs.py and the
+    unique index is skipped instead of crashing the app at startup.
+    """
+    try:
+        inspector = inspect(engine)
+        if "job" not in inspector.get_table_names():
+            return
+        columns = {column["name"] for column in inspector.get_columns("job")}
+
+        with engine.begin() as connection:
+            if "title_key" not in columns:
+                connection.execute(
+                    text(
+                        "ALTER TABLE job ADD COLUMN title_key VARCHAR NOT NULL DEFAULT ''"
+                    )
+                )
+
+            rows = connection.execute(text("SELECT id, title FROM job")).fetchall()
+            for row_id, title in rows:
+                connection.execute(
+                    text("UPDATE job SET title_key = :key WHERE id = :id"),
+                    {"key": normalize_title(title or ""), "id": row_id},
+                )
+
+            duplicates = connection.execute(
+                text(
+                    "SELECT tenant_id, title_key, COUNT(*) AS n FROM job "
+                    "GROUP BY tenant_id, title_key HAVING COUNT(*) > 1"
+                )
+            ).fetchall()
+            if duplicates:
+                logger.warning(
+                    "Found %d duplicate job title group(s); skipping the unique "
+                    "index on (tenant_id, title_key). Run "
+                    "`python -m scripts.dedupe_jobs --apply` to merge duplicates, "
+                    "then restart the API.",
+                    len(duplicates),
+                )
+                return
+
+            connection.execute(
+                text(
+                    f"CREATE UNIQUE INDEX IF NOT EXISTS {JOB_TITLE_INDEX_NAME} "
+                    "ON job (tenant_id, title_key)"
+                )
+            )
+    except Exception:  # pragma: no cover - defensive: never block startup
+        logger.exception("Could not ensure the unique job title index")
 
 
 def list_jobs(session: Session, tenant_id: int) -> list[Job]:

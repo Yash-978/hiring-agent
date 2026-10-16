@@ -1,8 +1,14 @@
+import logging
 from typing import Any
-from fastapi.testclient import TestClient
-from sqlmodel import Session, select
 
-from app.models import Application, AuditLog
+from fastapi.testclient import TestClient
+from sqlalchemy import inspect as sa_inspect
+from sqlalchemy import text
+from sqlmodel import Session, SQLModel, create_engine, select
+from sqlmodel.pool import StaticPool
+
+from app.models import Application, AuditLog, Job
+from app.services import job_service
 
 
 def test_create_job_happy_path(
@@ -390,4 +396,217 @@ def test_compare_job_candidates_cross_tenant_is_404(
 
     resp = client.get(f"/jobs/{job['id']}/compare", headers=tenant_b["headers"])
     assert resp.status_code == 404
+
+
+# --- Unique job titles (TASK 4) -------------------------------------------
+
+
+def test_create_job_duplicate_title_returns_409(
+    two_tenants: dict[str, dict[str, Any]],
+    client: TestClient,
+) -> None:
+    tenant_a = two_tenants["tenant_a"]
+
+    first = client.post(
+        "/jobs",
+        headers=tenant_a["headers"],
+        json={"title": "Mobile App Developer", "description": "iOS and Android"},
+    )
+    assert first.status_code == 201
+    first_id = first.json()["id"]
+
+    # Same title, different case and extra whitespace.
+    dup = client.post(
+        "/jobs",
+        headers=tenant_a["headers"],
+        json={"title": "  mobile   app developer ", "description": "Duplicate"},
+    )
+    assert dup.status_code == 409
+    assert dup.json()["detail"] == "A job with this title already exists"
+    assert dup.json()["existing_job_id"] == first_id
+
+    jobs = client.get("/jobs", headers=tenant_a["headers"]).json()
+    assert len(jobs) == 1
+
+
+def test_same_job_title_allowed_across_tenants(
+    two_tenants: dict[str, dict[str, Any]],
+    client: TestClient,
+) -> None:
+    tenant_a = two_tenants["tenant_a"]
+    tenant_b = two_tenants["tenant_b"]
+
+    a = client.post(
+        "/jobs",
+        headers=tenant_a["headers"],
+        json={"title": "Data Analyst", "description": "SQL and dashboards"},
+    )
+    b = client.post(
+        "/jobs",
+        headers=tenant_b["headers"],
+        json={"title": "data   analyst", "description": "SQL and dashboards"},
+    )
+    assert a.status_code == 201
+    assert b.status_code == 201
+    assert a.json()["id"] != b.json()["id"]
+
+
+def test_patch_job_updates_fields_and_logs_audit(
+    two_tenants: dict[str, dict[str, Any]],
+    client: TestClient,
+    session: Session,
+) -> None:
+    tenant_a = two_tenants["tenant_a"]
+
+    job = client.post(
+        "/jobs",
+        headers=tenant_a["headers"],
+        json={"title": "Support Engineer", "description": "Helpdesk"},
+    ).json()
+
+    resp = client.patch(
+        f"/jobs/{job['id']}",
+        headers=tenant_a["headers"],
+        json={
+            "title": "Senior Support Engineer",
+            "must_have_skills": ["Zendesk"],
+            "min_years_experience": 2.0,
+        },
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["title"] == "Senior Support Engineer"
+    assert data["description"] == "Helpdesk"  # untouched by a partial update
+    assert data["must_have_skills"] == ["Zendesk"]
+    assert data["min_years_experience"] == 2.0
+
+    audit = session.exec(
+        select(AuditLog).where(
+            AuditLog.action == "update_job",
+            AuditLog.entity_id == job["id"],
+        )
+    ).first()
+    assert audit is not None
+    assert audit.actor_name == tenant_a["user"].email
+
+
+def test_patch_job_to_duplicate_title_returns_409(
+    two_tenants: dict[str, dict[str, Any]],
+    client: TestClient,
+) -> None:
+    tenant_a = two_tenants["tenant_a"]
+
+    first = client.post(
+        "/jobs",
+        headers=tenant_a["headers"],
+        json={"title": "QA Engineer", "description": "Testing"},
+    ).json()
+    second = client.post(
+        "/jobs",
+        headers=tenant_a["headers"],
+        json={"title": "Site Reliability Engineer", "description": "On-call"},
+    ).json()
+
+    resp = client.patch(
+        f"/jobs/{second['id']}",
+        headers=tenant_a["headers"],
+        json={"title": " qa   engineer "},
+    )
+    assert resp.status_code == 409
+    assert resp.json()["existing_job_id"] == first["id"]
+
+    # The rename was rejected, so the job keeps its original title.
+    still = client.get(f"/jobs/{second['id']}", headers=tenant_a["headers"]).json()
+    assert still["title"] == "Site Reliability Engineer"
+
+
+def test_patch_job_cross_tenant_is_404(
+    two_tenants: dict[str, dict[str, Any]],
+    client: TestClient,
+) -> None:
+    tenant_a = two_tenants["tenant_a"]
+    tenant_b = two_tenants["tenant_b"]
+
+    job = client.post(
+        "/jobs",
+        headers=tenant_a["headers"],
+        json={"title": "Growth Marketer", "description": "Campaigns"},
+    ).json()
+
+    resp = client.patch(
+        f"/jobs/{job['id']}",
+        headers=tenant_b["headers"],
+        json={"title": "Hijacked"},
+    )
+    assert resp.status_code == 404
+
+
+def _fresh_engine() -> Any:
+    return create_engine(
+        "sqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+
+
+def test_ensure_job_unique_index_backfills_and_creates_index() -> None:
+    engine = _fresh_engine()
+    SQLModel.metadata.create_all(engine)
+    with Session(engine) as session:
+        session.add(
+            Job(tenant_id=1, title="  Mobile  App Developer ", description="x")
+        )
+        session.commit()
+
+    job_service.ensure_job_unique_index(engine)
+
+    with Session(engine) as session:
+        job = session.exec(select(Job)).one()
+        assert job.title_key == "mobile app developer"
+
+    index_names = {i["name"] for i in sa_inspect(engine).get_indexes("job")}
+    assert job_service.JOB_TITLE_INDEX_NAME in index_names
+
+
+def test_ensure_job_unique_index_skips_index_when_duplicates_exist(
+    caplog: Any,
+) -> None:
+    engine = _fresh_engine()
+    SQLModel.metadata.create_all(engine)
+    with Session(engine) as session:
+        session.add(Job(tenant_id=1, title="Mobile App Developer", description="a"))
+        session.add(Job(tenant_id=1, title="mobile   app developer", description="b"))
+        session.commit()
+
+    with caplog.at_level(logging.WARNING, logger="app.services.job_service"):
+        job_service.ensure_job_unique_index(engine)
+
+    index_names = {i["name"] for i in sa_inspect(engine).get_indexes("job")}
+    assert job_service.JOB_TITLE_INDEX_NAME not in index_names
+    assert "duplicate job title" in caplog.text
+    assert "dedupe_jobs" in caplog.text
+
+
+def test_ensure_job_unique_index_adds_missing_column() -> None:
+    """Existing databases predate title_key, so it must be added in place."""
+    engine = _fresh_engine()
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                "CREATE TABLE job ("
+                "id INTEGER PRIMARY KEY, tenant_id INTEGER, "
+                "title VARCHAR NOT NULL, description VARCHAR NOT NULL)"
+            )
+        )
+        connection.execute(
+            text("INSERT INTO job (tenant_id, title, description) VALUES (1, 'Ops Lead', 'x')")
+        )
+
+    job_service.ensure_job_unique_index(engine)
+
+    columns = {c["name"] for c in sa_inspect(engine).get_columns("job")}
+    assert "title_key" in columns
+    with engine.begin() as connection:
+        row = connection.execute(text("SELECT title_key FROM job")).fetchone()
+    assert row is not None and row[0] == "ops lead"
 

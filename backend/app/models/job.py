@@ -15,6 +15,10 @@ class Job(SQLModel, table=True):
     id: int | None = Field(default=None, primary_key=True)
     tenant_id: int = Field(foreign_key="tenant.id", index=True)
     title: str
+    # Casefolded, whitespace-collapsed form of title. Unique per tenant (index is
+    # created at startup by ensure_job_unique_index) so "Mobile App  Developer"
+    # and "mobile app developer" cannot both exist.
+    title_key: str = Field(default="")
     description: str
     status: JobStatus = Field(
         default=JobStatus.OPEN,

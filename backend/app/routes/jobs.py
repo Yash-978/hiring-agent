@@ -4,7 +4,7 @@ from sqlmodel import Session
 from app.db import get_session
 from app.deps import get_current_user
 from app.models import User
-from app.schemas.job import JobCompareRead, JobCreate, JobRead
+from app.schemas.job import JobCompareRead, JobCreate, JobRead, JobUpdate
 from app.services import job_service
 
 router = APIRouter(prefix="/jobs", tags=["jobs"])
@@ -55,6 +55,24 @@ def get_job(
         session=session,
         job_id=id,
         tenant_id=current_user.tenant_id,
+    )
+    return JobRead.model_validate(job)
+
+
+@router.patch("/{id}", response_model=JobRead)
+def update_job(
+    id: int,
+    data: JobUpdate,
+    session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_user),
+) -> JobRead:
+    """Partially update a job for current user's tenant."""
+    job = job_service.update_job(
+        session=session,
+        tenant_id=current_user.tenant_id,
+        job_id=id,
+        data=data,
+        actor_name=current_user.email,
     )
     return JobRead.model_validate(job)
 

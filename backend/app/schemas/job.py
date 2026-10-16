@@ -11,6 +11,17 @@ class JobCreate(BaseModel):
     min_years_experience: float | None = None
 
 
+class JobUpdate(BaseModel):
+    """Partial job update. Only the fields present in the request are applied."""
+
+    title: str | None = None
+    description: str | None = None
+    status: str | None = None
+    must_have_skills: list[str] | None = None
+    nice_to_have_skills: list[str] | None = None
+    min_years_experience: float | None = None
+
+
 class CompareJobRead(BaseModel):
     id: int
     title: str

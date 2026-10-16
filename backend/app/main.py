@@ -5,7 +5,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app.config import get_settings
-from app.db import create_db_and_tables
+from app.db import create_db_and_tables, engine
+from app.services.job_service import ensure_job_unique_index
 
 
 from app.exceptions import (
@@ -26,6 +27,7 @@ from app.routes.letters import router as letters_router
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     create_db_and_tables()
+    ensure_job_unique_index(engine)
     yield
 
 
@@ -72,7 +74,9 @@ async def forbidden_handler(request: Request, exc: ForbiddenException) -> JSONRe
 
 @app.exception_handler(ConflictException)
 async def conflict_handler(request: Request, exc: ConflictException) -> JSONResponse:
-    return JSONResponse(status_code=409, content={"detail": exc.message or "Conflict"})
+    content: dict[str, object] = {"detail": exc.message or "Conflict"}
+    content.update(exc.payload)
+    return JSONResponse(status_code=409, content=content)
 
 
 @app.exception_handler(ApprovalRequiredException)

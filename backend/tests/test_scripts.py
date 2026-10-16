@@ -1,17 +1,23 @@
-"""Tests for the developer scripts: try_resume.py and seed.py sample loading."""
+"""Tests for the developer scripts: try_resume.py, seed.py and dedupe_jobs.py."""
 
 import importlib.util
+from datetime import datetime, timezone
 from pathlib import Path
 from types import ModuleType
+from typing import Any
 
 from sqlmodel import Session, select
 
 from app.models import (
     Application,
+    Approval,
+    ApprovalActionType,
     AuditLog,
     Candidate,
     Job,
     Tenant,
+    User,
+    UserRole,
 )
 
 BACKEND_DIR = Path(__file__).resolve().parent.parent
@@ -139,3 +145,126 @@ def test_seed_sample_candidates_creates_candidates_and_applications(
     ).all()
     assert len(apps) == 4
     assert {a.candidate_id for a in apps} == {c.id for c in stored}
+
+
+# --- dedupe_jobs.py (TASK 4) ----------------------------------------------
+
+
+def _dedupe_tenant(session: Session) -> Tenant:
+    tenant = Tenant(name="Dedupe Co")
+    session.add(tenant)
+    session.commit()
+    session.refresh(tenant)
+    assert tenant.id is not None
+    return tenant
+
+
+def test_dedupe_find_duplicate_groups_groups_by_normalized_title(
+    session: Session,
+) -> None:
+    dedupe = _load_script("dedupe_jobs")
+    tenant = _dedupe_tenant(session)
+
+    older = Job(tenant_id=tenant.id, title="Mobile App Developer", description="a")
+    newer = Job(tenant_id=tenant.id, title="mobile  app   developer", description="b")
+    other = Job(tenant_id=tenant.id, title="Backend Engineer", description="c")
+    session.add(older)
+    session.add(newer)
+    session.add(other)
+    session.commit()
+
+    groups = dedupe.find_duplicate_groups(session)
+    assert len(groups) == 1
+    assert {job.id for job in groups[0]} == {older.id, newer.id}
+
+
+def test_dedupe_merge_group_moves_children_to_oldest_job(session: Session) -> None:
+    dedupe = _load_script("dedupe_jobs")
+    tenant = _dedupe_tenant(session)
+
+    user = User(
+        tenant_id=tenant.id,
+        email="admin@merge.com",
+        hashed_password="not-a-real-hash",
+        role=UserRole.ADMIN,
+    )
+    candidate = Candidate(
+        tenant_id=tenant.id, full_name="Ada Lovelace", email="ada@merge.com"
+    )
+    session.add(user)
+    session.add(candidate)
+    session.commit()
+    session.refresh(user)
+    session.refresh(candidate)
+
+    keeper = Job(
+        tenant_id=tenant.id,
+        title="Mobile App Developer",
+        description="keep",
+        created_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
+    )
+    duplicate = Job(
+        tenant_id=tenant.id,
+        title="mobile app developer",
+        description="duplicate",
+        must_have_skills=["Kotlin"],
+        min_years_experience=3.0,
+        created_at=datetime(2026, 2, 1, tzinfo=timezone.utc),
+    )
+    session.add(keeper)
+    session.add(duplicate)
+    session.commit()
+    session.refresh(keeper)
+    session.refresh(duplicate)
+    assert keeper.id is not None and duplicate.id is not None
+
+    application = Application(
+        tenant_id=tenant.id, candidate_id=candidate.id, job_id=duplicate.id
+    )
+    approval = Approval(
+        tenant_id=tenant.id,
+        action_type=ApprovalActionType.SHORTLIST,
+        target_type="job",
+        target_id=duplicate.id,
+        requested_by=user.id,
+    )
+    session.add(application)
+    session.add(approval)
+    session.commit()
+    session.refresh(application)
+    session.refresh(approval)
+
+    # Passing the group out of order must still pick the oldest job as keeper.
+    actions = dedupe.merge_group(session, [duplicate, keeper], apply=True)
+
+    assert len(actions) == 1
+    session.refresh(application)
+    session.refresh(approval)
+    assert application.job_id == keeper.id
+    assert approval.target_id == keeper.id
+    assert session.get(Job, duplicate.id) is None
+    session.refresh(keeper)
+    assert keeper.must_have_skills == ["Kotlin"]
+    assert keeper.min_years_experience == 3.0
+
+
+def test_dedupe_main_dry_run_reports_without_changing(
+    session: Session,
+    monkeypatch: Any,
+    capsys: Any,
+) -> None:
+    dedupe = _load_script("dedupe_jobs")
+    tenant = _dedupe_tenant(session)
+
+    session.add(Job(tenant_id=tenant.id, title="Mobile App Developer", description="a"))
+    session.add(Job(tenant_id=tenant.id, title="mobile app developer", description="b"))
+    session.commit()
+
+    monkeypatch.setattr(dedupe, "engine", session.get_bind())
+    exit_code = dedupe.main(apply=False)
+
+    assert exit_code == 0
+    output = capsys.readouterr().out
+    assert "duplicate title group" in output
+    assert "Dry run" in output
+    assert len(session.exec(select(Job)).all()) == 2
