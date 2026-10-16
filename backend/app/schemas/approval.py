@@ -15,6 +15,8 @@ class ApprovalRead(BaseModel):
     action_type: str
     target_type: str
     target_id: int
+    candidate_name: str | None = None
+    job_title: str | None = None
     payload: dict[str, Any] | None = None
     status: str
     requested_by: int

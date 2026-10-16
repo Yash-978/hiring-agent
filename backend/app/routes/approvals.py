@@ -22,7 +22,14 @@ def get_approvals(
         tenant_id=current_user.tenant_id,
         status=status,
     )
-    return [ApprovalRead.model_validate(a) for a in approvals]
+    return [
+        approval_service.build_approval_read(
+            session=session,
+            tenant_id=current_user.tenant_id,
+            approval=a,
+        )
+        for a in approvals
+    ]
 
 
 @router.get("/{id}", response_model=ApprovalRead)
@@ -37,7 +44,11 @@ def get_approval(
         approval_id=id,
         tenant_id=current_user.tenant_id,
     )
-    return ApprovalRead.model_validate(approval)
+    return approval_service.build_approval_read(
+        session=session,
+        tenant_id=current_user.tenant_id,
+        approval=approval,
+    )
 
 
 @router.post("/{id}/approve", response_model=ApprovalRead)
@@ -55,7 +66,11 @@ def approve_approval(
         user=current_user,
         note=note,
     )
-    return ApprovalRead.model_validate(approval)
+    return approval_service.build_approval_read(
+        session=session,
+        tenant_id=current_user.tenant_id,
+        approval=approval,
+    )
 
 
 @router.post("/{id}/reject", response_model=ApprovalRead)
@@ -73,4 +88,8 @@ def reject_approval(
         user=current_user,
         note=note,
     )
-    return ApprovalRead.model_validate(approval)
+    return approval_service.build_approval_read(
+        session=session,
+        tenant_id=current_user.tenant_id,
+        approval=approval,
+    )

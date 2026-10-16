@@ -538,7 +538,7 @@ export function CandidateDetail() {
                       <span className="font-medium">Match Score</span>
                     </div>
                     <span className="text-2xl font-bold text-primary">
-                      {application.score.toFixed(1)} / 10
+                      {application.score.toFixed(1)} / 100
                     </span>
                   </div>
                   {application.score_reasoning && (

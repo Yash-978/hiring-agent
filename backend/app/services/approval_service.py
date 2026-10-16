@@ -9,13 +9,17 @@ from app.exceptions import (
     NotFoundException,
 )
 from app.models import (
+    Application,
     Approval,
     ApprovalActionType,
     ApprovalStatus,
     AuditActorType,
+    Candidate,
+    Job,
     User,
     UserRole,
 )
+from app.schemas.approval import ApprovalRead
 from app.services.audit_service import log_event
 
 
@@ -245,3 +249,51 @@ def get_approval(
     if not approval or approval.tenant_id != tenant_id:
         raise NotFoundException(f"Approval {approval_id} not found")
     return approval
+
+
+def resolve_target_labels(
+    session: Session,
+    tenant_id: int,
+    target_type: str,
+    target_id: int,
+) -> tuple[str | None, str | None]:
+    """Resolve (candidate_name, job_title) for an application-backed approval.
+
+    Approvals point at a target by type/id. Only "application" targets map to a
+    candidate and job; any other type, or a target that no longer exists, yields
+    (None, None) so listing approvals never fails on stale data.
+    """
+    if target_type != "application":
+        return None, None
+    statement = (
+        select(Candidate.full_name, Job.title)
+        .join(Application, Application.candidate_id == Candidate.id)
+        .join(Job, Application.job_id == Job.id)
+        .where(
+            Application.id == target_id,
+            Application.tenant_id == tenant_id,
+        )
+    )
+    row = session.exec(statement).first()
+    if not row:
+        return None, None
+    candidate_name, job_title = row
+    return candidate_name, job_title
+
+
+def build_approval_read(
+    session: Session,
+    tenant_id: int,
+    approval: Approval,
+) -> ApprovalRead:
+    """Serialize an approval, adding the candidate name and job title it targets."""
+    candidate_name, job_title = resolve_target_labels(
+        session=session,
+        tenant_id=tenant_id,
+        target_type=approval.target_type,
+        target_id=approval.target_id,
+    )
+    read = ApprovalRead.model_validate(approval)
+    return read.model_copy(
+        update={"candidate_name": candidate_name, "job_title": job_title}
+    )

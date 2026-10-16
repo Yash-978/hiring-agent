@@ -256,6 +256,79 @@ def test_get_approvals_list_and_filter(
     assert app2.id in pending_ids
 
 
+def test_approval_read_includes_candidate_name_and_job_title(
+    two_tenants: dict[str, dict[str, Any]],
+    client: TestClient,
+    session: Session,
+) -> None:
+    tenant_a = two_tenants["tenant_a"]
+
+    candidate = client.post(
+        "/candidates",
+        headers=tenant_a["headers"],
+        json={"full_name": "Selina Kyle", "email": "selina@waynecorp.com"},
+    ).json()
+    job = client.post(
+        "/jobs",
+        headers=tenant_a["headers"],
+        json={"title": "Burglar", "description": "Retrieve valuable items"},
+    ).json()
+    application = client.post(
+        "/applications",
+        headers=tenant_a["headers"],
+        json={"candidate_id": candidate["id"], "job_id": job["id"]},
+    ).json()
+
+    approval = approval_service.request_approval(
+        session=session,
+        tenant_id=tenant_a["tenant"].id,
+        action_type=ApprovalActionType.SHORTLIST,
+        target_type="application",
+        target_id=application["id"],
+        payload=None,
+        requested_by=tenant_a["user"].id,
+    )
+
+    # List response resolves the candidate name and job title of the target
+    res_list = client.get("/approvals", headers=tenant_a["headers"])
+    assert res_list.status_code == 200
+    listed = next(item for item in res_list.json() if item["id"] == approval.id)
+    assert listed["candidate_name"] == "Selina Kyle"
+    assert listed["job_title"] == "Burglar"
+
+    # Detail response resolves the same labels
+    res_detail = client.get(f"/approvals/{approval.id}", headers=tenant_a["headers"])
+    assert res_detail.status_code == 200
+    detail = res_detail.json()
+    assert detail["candidate_name"] == "Selina Kyle"
+    assert detail["job_title"] == "Burglar"
+
+
+def test_approval_read_labels_null_for_unresolvable_target(
+    two_tenants: dict[str, dict[str, Any]],
+    client: TestClient,
+    session: Session,
+) -> None:
+    tenant_a = two_tenants["tenant_a"]
+
+    # A target_id with no matching application must still serialize safely
+    approval = approval_service.request_approval(
+        session=session,
+        tenant_id=tenant_a["tenant"].id,
+        action_type=ApprovalActionType.SHORTLIST,
+        target_type="application",
+        target_id=987654,
+        payload=None,
+        requested_by=tenant_a["user"].id,
+    )
+
+    res = client.get("/approvals", headers=tenant_a["headers"])
+    assert res.status_code == 200
+    item = next(i for i in res.json() if i["id"] == approval.id)
+    assert item["candidate_name"] is None
+    assert item["job_title"] is None
+
+
 def test_require_approved_gate(
     two_tenants: dict[str, dict[str, Any]],
     session: Session,

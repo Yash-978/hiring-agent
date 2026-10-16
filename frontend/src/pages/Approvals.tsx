@@ -74,7 +74,7 @@ function renderShortlistDetails(payload: Record<string, unknown> | null) {
       <div>
         <Label className="font-medium text-muted-foreground">Score</Label>
         <p className="text-lg font-semibold mt-1">
-          {typeof payload.score === "number" ? payload.score.toFixed(1) : "—"} / 10
+          {typeof payload.score === "number" ? payload.score.toFixed(1) : "—"} / 100
         </p>
       </div>
       {skills && (
@@ -195,13 +195,13 @@ function ApprovalCard({
           <div>
             <Label className="font-medium text-muted-foreground">Candidate</Label>
             <p className="font-medium mt-1">
-              {approval.payload?.candidate_name as string ?? `Candidate #${approval.target_id}`}
+              {approval.candidate_name ?? `Candidate #${approval.target_id}`}
             </p>
           </div>
           <div>
             <Label className="font-medium text-muted-foreground">Job</Label>
             <p className="font-medium mt-1">
-              {approval.payload?.job_title as string ?? `Job #${approval.target_id}`}
+              {approval.job_title ?? `Job #${approval.target_id}`}
             </p>
           </div>
         </div>
