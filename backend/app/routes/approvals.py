@@ -4,7 +4,12 @@ from sqlmodel import Session
 from app.db import get_session
 from app.deps import get_current_user
 from app.models import User
-from app.schemas.approval import ApprovalDecisionRequest, ApprovalRead
+from app.schemas.approval import (
+    ApprovalCountsRead,
+    ApprovalDecisionRequest,
+    ApprovalRead,
+    ApprovalRejectRequest,
+)
 from app.services import approval_service
 
 router = APIRouter(prefix="/approvals", tags=["approvals"])
@@ -22,14 +27,24 @@ def get_approvals(
         tenant_id=current_user.tenant_id,
         status=status,
     )
-    return [
-        approval_service.build_approval_read(
-            session=session,
-            tenant_id=current_user.tenant_id,
-            approval=a,
-        )
-        for a in approvals
-    ]
+    return approval_service.build_approval_reads(
+        session=session,
+        tenant_id=current_user.tenant_id,
+        approvals=approvals,
+    )
+
+
+@router.get("/counts", response_model=ApprovalCountsRead)
+def get_approval_counts(
+    session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_user),
+) -> ApprovalCountsRead:
+    """Count the tenant's approvals per status (pending, approved, rejected)."""
+    counts = approval_service.count_approvals_by_status(
+        session=session,
+        tenant_id=current_user.tenant_id,
+    )
+    return ApprovalCountsRead(**counts)
 
 
 @router.get("/{id}", response_model=ApprovalRead)
@@ -76,17 +91,16 @@ def approve_approval(
 @router.post("/{id}/reject", response_model=ApprovalRead)
 def reject_approval(
     id: int,
-    decision: ApprovalDecisionRequest | None = None,
+    decision: ApprovalRejectRequest,
     session: Session = Depends(get_session),
     current_user: User = Depends(get_current_user),
 ) -> ApprovalRead:
-    """Reject a pending approval (admin or approver only)."""
-    note = decision.note if decision else None
+    """Reject a pending approval (admin or approver only). A note is required."""
     approval = approval_service.reject(
         session=session,
         approval_id=id,
         user=current_user,
-        note=note,
+        note=decision.note,
     )
     return approval_service.build_approval_read(
         session=session,

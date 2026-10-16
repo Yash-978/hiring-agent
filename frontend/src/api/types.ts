@@ -61,8 +61,12 @@ export interface Approval {
   action_type: string;
   target_type: string;
   target_id: number;
+  application_id?: number | null;
   candidate_name: string | null;
   job_title: string | null;
+  score?: number | null;
+  recommendation?: string | null;
+  requested_by_name?: string | null;
   payload: Record<string, unknown> | null;
   status: string;
   requested_by: number;
@@ -78,8 +82,12 @@ export interface ApprovalRead {
   action_type: string;
   target_type: string;
   target_id: number;
+  application_id?: number | null;
   candidate_name: string | null;
   job_title: string | null;
+  score?: number | null;
+  recommendation?: string | null;
+  requested_by_name?: string | null;
   payload: Record<string, unknown> | null;
   status: string;
   requested_by: number;
