@@ -737,3 +737,192 @@ def test_resume_extension_maps_known_content_types() -> None:
     )
     assert _resume_extension("application/octet-stream") == "bin"
     assert _resume_extension(None) == "bin"
+
+
+def _analyzed_application(
+    client: TestClient,
+    headers: dict[str, str],
+    *,
+    candidate_name: str = "Alice Smith",
+    candidate_email: str = "alice@example.com",
+    job_title: str = "Backend Engineer",
+    job_description: str = "Python, FastAPI, Docker",
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Create a candidate, job and analyzed application; return (candidate, app)."""
+    cand = client.post(
+        "/candidates",
+        headers=headers,
+        json={"full_name": candidate_name, "email": candidate_email},
+    ).json()
+    job = client.post(
+        "/jobs",
+        headers=headers,
+        json={"title": job_title, "description": job_description},
+    ).json()
+    app = client.post(
+        "/applications",
+        headers=headers,
+        json={"candidate_id": cand["id"], "job_id": job["id"]},
+    ).json()
+    files = {"file": ("resume.txt", LONG_RESUME, "text/plain")}
+    resp = client.post(
+        f"/applications/{app['id']}/analyze",
+        headers=headers,
+        files=files,
+    )
+    assert resp.status_code == 200
+    return cand, app
+
+
+def test_get_application_analysis_happy_path(
+    two_tenants: dict[str, dict[str, Any]],
+    client: TestClient,
+) -> None:
+    tenant_a = two_tenants["tenant_a"]
+
+    _cand, app = _analyzed_application(client, tenant_a["headers"])
+
+    resp = client.get(
+        f"/applications/{app['id']}/analysis", headers=tenant_a["headers"]
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+
+    assert data["application_id"] == app["id"]
+    assert data["job"]["id"] == app["job_id"]
+    assert data["job"]["title"] == "Backend Engineer"
+
+    assert data["candidate"]["full_name"] == "Alice Smith"
+    assert data["candidate"]["email"] == "alice@example.com"
+    assert data["candidate"]["total_years_experience"] == 5.0
+
+    assert data["score"] == 90.0
+    assert data["breakdown"]["must_have"]["ratio"] == 1.0
+    assert data["breakdown"]["must_have"]["count"] == 2
+    assert data["breakdown"]["nice_to_have"]["ratio"] == 0.5
+
+    assert len(data["criteria"]) == 4
+    assert data["criteria"][0]["criterion"] == "Python"
+    assert data["criteria"][0]["evidence_verified"] is True
+
+    assert data["recommendation"] == "shortlist"
+    assert data["confidence"] == "medium"
+    assert data["flags"] == []
+    assert data["model"] == "fake"
+    assert data["prompt_version"] == "resume_analysis_v1"
+    assert data["resume_available"] is True
+
+
+def test_get_application_analysis_before_analysis_is_404(
+    two_tenants: dict[str, dict[str, Any]],
+    client: TestClient,
+) -> None:
+    tenant_a = two_tenants["tenant_a"]
+
+    cand = client.post(
+        "/candidates",
+        headers=tenant_a["headers"],
+        json={"full_name": "Carol Danvers", "email": "carol@example.com"},
+    ).json()
+    job = client.post(
+        "/jobs",
+        headers=tenant_a["headers"],
+        json={"title": "Pilot", "description": "Fly planes"},
+    ).json()
+    app = client.post(
+        "/applications",
+        headers=tenant_a["headers"],
+        json={"candidate_id": cand["id"], "job_id": job["id"]},
+    ).json()
+
+    resp = client.get(
+        f"/applications/{app['id']}/analysis", headers=tenant_a["headers"]
+    )
+    assert resp.status_code == 404
+    assert "not been analyzed" in resp.json()["detail"].lower()
+
+
+def test_get_application_analysis_cross_tenant_is_404(
+    two_tenants: dict[str, dict[str, Any]],
+    client: TestClient,
+) -> None:
+    tenant_a = two_tenants["tenant_a"]
+    tenant_b = two_tenants["tenant_b"]
+
+    _cand, app = _analyzed_application(client, tenant_a["headers"])
+
+    resp = client.get(
+        f"/applications/{app['id']}/analysis", headers=tenant_b["headers"]
+    )
+    assert resp.status_code == 404
+
+
+def test_download_application_resume_happy_path(
+    two_tenants: dict[str, dict[str, Any]],
+    client: TestClient,
+    session: Session,
+) -> None:
+    tenant_a = two_tenants["tenant_a"]
+
+    _cand, app = _analyzed_application(client, tenant_a["headers"])
+
+    resp = client.get(
+        f"/applications/{app['id']}/resume", headers=tenant_a["headers"]
+    )
+    assert resp.status_code == 200
+    assert resp.content == LONG_RESUME.encode("utf-8")
+    assert resp.headers["content-type"].startswith("text/plain")
+
+    # The download is audited for the owning tenant.
+    audit = session.exec(
+        select(AuditLog).where(
+            AuditLog.tenant_id == tenant_a["tenant"].id,
+            AuditLog.action == "resume_downloaded",
+            AuditLog.entity_id == app["id"],
+        )
+    ).first()
+    assert audit is not None
+    assert audit.actor_name == tenant_a["user"].email
+
+
+def test_download_application_resume_not_available_is_404(
+    two_tenants: dict[str, dict[str, Any]],
+    client: TestClient,
+) -> None:
+    tenant_a = two_tenants["tenant_a"]
+
+    cand = client.post(
+        "/candidates",
+        headers=tenant_a["headers"],
+        json={"full_name": "Scott Summers", "email": "scott@example.com"},
+    ).json()
+    job = client.post(
+        "/jobs",
+        headers=tenant_a["headers"],
+        json={"title": "Field Lead", "description": "Lead the field team"},
+    ).json()
+    app = client.post(
+        "/applications",
+        headers=tenant_a["headers"],
+        json={"candidate_id": cand["id"], "job_id": job["id"]},
+    ).json()
+
+    resp = client.get(
+        f"/applications/{app['id']}/resume", headers=tenant_a["headers"]
+    )
+    assert resp.status_code == 404
+
+
+def test_download_application_resume_cross_tenant_is_404(
+    two_tenants: dict[str, dict[str, Any]],
+    client: TestClient,
+) -> None:
+    tenant_a = two_tenants["tenant_a"]
+    tenant_b = two_tenants["tenant_b"]
+
+    _cand, app = _analyzed_application(client, tenant_a["headers"])
+
+    resp = client.get(
+        f"/applications/{app['id']}/resume", headers=tenant_b["headers"]
+    )
+    assert resp.status_code == 404

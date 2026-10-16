@@ -1,7 +1,13 @@
 from sqlmodel import Session, select
 
 from app.exceptions import NotFoundException
-from app.models import AuditActorType, Job, JobStatus
+from app.models import Application, AuditActorType, Candidate, Job, JobStatus
+from app.schemas.job import (
+    CompareCandidateRead,
+    CompareCriterionRead,
+    CompareJobRead,
+    JobCompareRead,
+)
 from app.services.audit_service import log_event
 
 
@@ -63,3 +69,68 @@ def get_job(session: Session, job_id: int, tenant_id: int) -> Job:
     if not job or job.tenant_id != tenant_id:
         raise NotFoundException(f"Job {job_id} not found")
     return job
+
+
+def compare_job_candidates(
+    session: Session,
+    tenant_id: int,
+    job_id: int,
+) -> JobCompareRead:
+    """Return the job and its analyzed candidates ordered by score (best first)."""
+    job = get_job(session=session, job_id=job_id, tenant_id=tenant_id)
+
+    statement = (
+        select(Application, Candidate.full_name)
+        .join(Candidate, Application.candidate_id == Candidate.id)
+        .where(
+            Application.tenant_id == tenant_id,
+            Application.job_id == job_id,
+            Candidate.tenant_id == tenant_id,
+        )
+        .order_by(Application.score.desc())
+    )
+    rows = session.exec(statement).all()
+
+    candidates: list[CompareCandidateRead] = []
+    for application, full_name in rows:
+        # JSON columns store Python None as JSON "null", so the analysis must be
+        # filtered in Python rather than with a SQL IS NOT NULL clause.
+        if not application.analysis:
+            continue
+        bundle = application.analysis
+        analysis = bundle.get("analysis", {})
+        raw_breakdown = bundle.get("breakdown", {})
+        breakdown = {
+            kind: float(raw_breakdown.get(kind, {}).get("ratio", 0.0))
+            for kind in ("must_have", "nice_to_have", "experience")
+        }
+        criteria = [
+            CompareCriterionRead(
+                criterion=criterion.get("criterion", ""),
+                kind=criterion.get("kind", ""),
+                verdict=criterion.get("verdict", ""),
+            )
+            for criterion in analysis.get("criteria", [])
+        ]
+        candidates.append(
+            CompareCandidateRead(
+                application_id=application.id,
+                name=full_name,
+                score=float(application.score or 0.0),
+                recommendation=analysis.get("recommendation", ""),
+                confidence=analysis.get("confidence", ""),
+                years=(analysis.get("candidate") or {}).get("total_years_experience"),
+                breakdown=breakdown,
+                criteria=criteria,
+            )
+        )
+
+    return JobCompareRead(
+        job=CompareJobRead(
+            id=job.id,
+            title=job.title,
+            must_have_skills=job.must_have_skills,
+            nice_to_have_skills=job.nice_to_have_skills,
+        ),
+        candidates=candidates,
+    )

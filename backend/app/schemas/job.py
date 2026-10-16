@@ -11,6 +11,35 @@ class JobCreate(BaseModel):
     min_years_experience: float | None = None
 
 
+class CompareJobRead(BaseModel):
+    id: int
+    title: str
+    must_have_skills: list[str] = []
+    nice_to_have_skills: list[str] = []
+
+
+class CompareCriterionRead(BaseModel):
+    criterion: str
+    kind: str
+    verdict: str
+
+
+class CompareCandidateRead(BaseModel):
+    application_id: int
+    name: str
+    score: float
+    recommendation: str
+    confidence: str
+    years: float | None = None
+    breakdown: dict[str, float]
+    criteria: list[CompareCriterionRead]
+
+
+class JobCompareRead(BaseModel):
+    job: CompareJobRead
+    candidates: list[CompareCandidateRead]
+
+
 class JobRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

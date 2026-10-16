@@ -4,7 +4,7 @@ from sqlmodel import Session
 from app.db import get_session
 from app.deps import get_current_user
 from app.models import User
-from app.schemas.job import JobCreate, JobRead
+from app.schemas.job import JobCompareRead, JobCreate, JobRead
 from app.services import job_service
 
 router = APIRouter(prefix="/jobs", tags=["jobs"])
@@ -57,3 +57,17 @@ def get_job(
         tenant_id=current_user.tenant_id,
     )
     return JobRead.model_validate(job)
+
+
+@router.get("/{id}/compare", response_model=JobCompareRead)
+def compare_job_candidates(
+    id: int,
+    session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_user),
+) -> JobCompareRead:
+    """Compare analyzed candidates for a job, best score first (tenant-scoped)."""
+    return job_service.compare_job_candidates(
+        session=session,
+        tenant_id=current_user.tenant_id,
+        job_id=id,
+    )

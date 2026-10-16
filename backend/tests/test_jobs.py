@@ -2,7 +2,7 @@ from typing import Any
 from fastapi.testclient import TestClient
 from sqlmodel import Session, select
 
-from app.models import AuditLog
+from app.models import Application, AuditLog
 
 
 def test_create_job_happy_path(
@@ -240,4 +240,154 @@ def test_analyze_application_keeps_existing_job_requirements(
     assert unchanged["must_have_skills"] == ["Rust"]
     assert unchanged["nice_to_have_skills"] == ["Elixir"]
     assert unchanged["min_years_experience"] == 8.0
+
+
+def _analyze_for_job(
+    client: TestClient,
+    headers: dict[str, str],
+    job_id: int,
+    name: str,
+    email: str,
+) -> dict[str, Any]:
+    """Create a candidate and application for the job, analyze it, return the app."""
+    cand = client.post(
+        "/candidates",
+        headers=headers,
+        json={"full_name": name, "email": email},
+    ).json()
+    app = client.post(
+        "/applications",
+        headers=headers,
+        json={"candidate_id": cand["id"], "job_id": job_id},
+    ).json()
+    files = {"file": ("resume.txt", LONG_RESUME, "text/plain")}
+    resp = client.post(
+        f"/applications/{app['id']}/analyze",
+        headers=headers,
+        files=files,
+    )
+    assert resp.status_code == 200
+    return app
+
+
+def test_compare_job_candidates_includes_only_analyzed(
+    two_tenants: dict[str, dict[str, Any]],
+    client: TestClient,
+) -> None:
+    tenant_a = two_tenants["tenant_a"]
+
+    job = client.post(
+        "/jobs",
+        headers=tenant_a["headers"],
+        json={"title": "Backend Engineer", "description": "Python, FastAPI, Docker"},
+    ).json()
+
+    analyzed = _analyze_for_job(
+        client, tenant_a["headers"], job["id"], "Alice Smith", "alice.compare@example.com"
+    )
+
+    # A second application for the same job that was never analyzed.
+    cand_b = client.post(
+        "/candidates",
+        headers=tenant_a["headers"],
+        json={"full_name": "Unanalyzed Ursula", "email": "ursula.compare@example.com"},
+    ).json()
+    client.post(
+        "/applications",
+        headers=tenant_a["headers"],
+        json={"candidate_id": cand_b["id"], "job_id": job["id"]},
+    )
+
+    resp = client.get(f"/jobs/{job['id']}/compare", headers=tenant_a["headers"])
+    assert resp.status_code == 200
+    data = resp.json()
+
+    assert data["job"]["id"] == job["id"]
+    assert data["job"]["title"] == "Backend Engineer"
+    assert data["job"]["must_have_skills"] == ["Python", "FastAPI"]
+    assert data["job"]["nice_to_have_skills"] == ["Docker"]
+
+    assert len(data["candidates"]) == 1
+    candidate = data["candidates"][0]
+    assert candidate["application_id"] == analyzed["id"]
+    assert candidate["name"] == "Alice Smith"
+    assert candidate["recommendation"] == "shortlist"
+    assert candidate["confidence"] == "medium"
+    assert set(candidate["breakdown"].keys()) == {
+        "must_have",
+        "nice_to_have",
+        "experience",
+    }
+    assert all(isinstance(v, float) for v in candidate["breakdown"].values())
+    assert len(candidate["criteria"]) == 4
+    assert set(candidate["criteria"][0].keys()) == {"criterion", "kind", "verdict"}
+
+
+def test_compare_job_candidates_with_no_analysis_returns_empty(
+    two_tenants: dict[str, dict[str, Any]],
+    client: TestClient,
+) -> None:
+    tenant_a = two_tenants["tenant_a"]
+
+    job = client.post(
+        "/jobs",
+        headers=tenant_a["headers"],
+        json={"title": "Backend Engineer", "description": "Python, FastAPI"},
+    ).json()
+
+    resp = client.get(f"/jobs/{job['id']}/compare", headers=tenant_a["headers"])
+    assert resp.status_code == 200
+    assert resp.json()["candidates"] == []
+
+
+def test_compare_job_candidates_sorted_by_score_descending(
+    two_tenants: dict[str, dict[str, Any]],
+    client: TestClient,
+    session: Session,
+) -> None:
+    tenant_a = two_tenants["tenant_a"]
+
+    job = client.post(
+        "/jobs",
+        headers=tenant_a["headers"],
+        json={"title": "Backend Engineer", "description": "Python, FastAPI, Docker"},
+    ).json()
+
+    low = _analyze_for_job(
+        client, tenant_a["headers"], job["id"], "Low Score", "low.compare@example.com"
+    )
+    high = _analyze_for_job(
+        client, tenant_a["headers"], job["id"], "High Score", "high.compare@example.com"
+    )
+
+    # Force distinct scores so the ordering is unambiguous.
+    for app_id, forced in ((low["id"], 40.0), (high["id"], 95.0)):
+        row = session.get(Application, app_id)
+        assert row is not None
+        row.score = forced
+        session.add(row)
+    session.commit()
+
+    resp = client.get(f"/jobs/{job['id']}/compare", headers=tenant_a["headers"])
+    assert resp.status_code == 200
+    scores = [c["score"] for c in resp.json()["candidates"]]
+    assert scores == [95.0, 40.0]
+    assert [c["name"] for c in resp.json()["candidates"]] == ["High Score", "Low Score"]
+
+
+def test_compare_job_candidates_cross_tenant_is_404(
+    two_tenants: dict[str, dict[str, Any]],
+    client: TestClient,
+) -> None:
+    tenant_a = two_tenants["tenant_a"]
+    tenant_b = two_tenants["tenant_b"]
+
+    job = client.post(
+        "/jobs",
+        headers=tenant_a["headers"],
+        json={"title": "Backend Engineer", "description": "Python, FastAPI"},
+    ).json()
+
+    resp = client.get(f"/jobs/{job['id']}/compare", headers=tenant_b["headers"])
+    assert resp.status_code == 404
 

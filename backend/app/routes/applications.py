@@ -1,16 +1,23 @@
 from datetime import date
 import io
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from fastapi.responses import FileResponse
 from pypdf import PdfReader
 from sqlmodel import Session
 
 from app.db import get_session
 from app.deps import get_current_user
 from app.exceptions import NotFoundException
-from app.models import User
-from app.schemas.application import ApplicationCreate, ApplicationRead, AuditLogRead
+from app.models import AuditActorType, User
+from app.schemas.application import (
+    ApplicationAnalysisRead,
+    ApplicationCreate,
+    ApplicationRead,
+    AuditLogRead,
+)
 from app.schemas.letter import OfferDraftRequest
 from app.services import application_service, audit_service
+from app.services.audit_service import log_event
 
 router = APIRouter(prefix="/applications", tags=["applications"])
 
@@ -194,6 +201,64 @@ async def analyze_application(
         score=app.score,
         score_reasoning=app.score_reasoning,
         created_at=app.created_at,
+    )
+
+
+@router.get("/{id}/analysis", response_model=ApplicationAnalysisRead)
+def get_application_analysis(
+    id: int,
+    session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_user),
+) -> ApplicationAnalysisRead:
+    """Return the stored resume analysis for an application (tenant-scoped)."""
+    try:
+        return application_service.build_analysis_read(
+            session=session,
+            application_id=id,
+            tenant_id=current_user.tenant_id,
+        )
+    except NotFoundException as e:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(e),
+        )
+
+
+@router.get("/{id}/resume")
+def download_application_resume(
+    id: int,
+    session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_user),
+) -> FileResponse:
+    """Download the stored resume upload for an application (tenant-scoped)."""
+    try:
+        file_path, media_type = application_service.resolve_resume_path(
+            session=session,
+            application_id=id,
+            tenant_id=current_user.tenant_id,
+        )
+    except NotFoundException as e:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(e),
+        )
+
+    log_event(
+        session=session,
+        tenant_id=current_user.tenant_id,
+        actor_type=AuditActorType.USER,
+        actor_name=current_user.email,
+        action="resume_downloaded",
+        entity_type="application",
+        entity_id=id,
+        details={},
+    )
+    session.commit()
+
+    return FileResponse(
+        path=str(file_path),
+        media_type=media_type,
+        filename=f"resume_{id}{file_path.suffix}",
     )
 
 

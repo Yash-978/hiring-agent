@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from sqlmodel import Session, select
 
 from app.config import get_settings
@@ -16,6 +18,12 @@ from app.models import (
 )
 from app.services.approval_service import require_approved, request_approval
 from app.services.audit_service import log_event
+from app.schemas.application import (
+    AnalysisCandidateRead,
+    AnalysisCriterionRead,
+    AnalysisJobRef,
+    ApplicationAnalysisRead,
+)
 from app.agents import (
     analyze_resume,
     draft_offer,
@@ -35,6 +43,14 @@ _RESUME_EXTENSIONS = {
     "text/plain": "txt",
     "application/msword": "doc",
     "application/vnd.openxmlformats-officedocument.wordprocessingml.document": "docx",
+}
+
+# Media types served back for the extensions we may store.
+_RESUME_MEDIA_TYPES = {
+    ".pdf": "application/pdf",
+    ".txt": "text/plain",
+    ".doc": "application/msword",
+    ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
 }
 
 
@@ -148,6 +164,78 @@ def get_application_with_details(
     if not result:
         raise NotFoundException(f"Application {application_id} not found")
     return result
+
+
+def build_analysis_read(
+    session: Session,
+    application_id: int,
+    tenant_id: int,
+) -> ApplicationAnalysisRead:
+    """Flatten the stored analysis bundle into the public response shape.
+
+    Raises NotFoundException when the application is not in the tenant or has
+    not been analyzed yet.
+    """
+    application, _candidate_name, job_title = get_application_with_details(
+        session=session,
+        application_id=application_id,
+        tenant_id=tenant_id,
+    )
+
+    bundle = application.analysis
+    if not bundle:
+        raise NotFoundException(f"Application {application_id} has not been analyzed")
+
+    analysis = bundle.get("analysis", {})
+    return ApplicationAnalysisRead(
+        application_id=application_id,
+        job=AnalysisJobRef(id=application.job_id, title=job_title),
+        candidate=AnalysisCandidateRead(**analysis.get("candidate", {})),
+        criteria=[
+            AnalysisCriterionRead(**criterion)
+            for criterion in analysis.get("criteria", [])
+        ],
+        score=float(bundle.get("score", 0.0)),
+        breakdown=bundle.get("breakdown", {}),
+        strengths=analysis.get("strengths", []),
+        concerns=analysis.get("concerns", []),
+        questions_for_candidate=analysis.get("questions_for_candidate", []),
+        recommendation=analysis.get("recommendation", ""),
+        confidence=analysis.get("confidence", ""),
+        flags=bundle.get("flags", []),
+        model=bundle.get("model", ""),
+        prompt_version=bundle.get("prompt_version", ""),
+        resume_available=bool(application.resume_path),
+    )
+
+
+def resolve_resume_path(
+    session: Session,
+    application_id: int,
+    tenant_id: int,
+) -> tuple[Path, str]:
+    """Return the absolute stored resume path and its media type.
+
+    Raises NotFoundException when the application is not in the tenant, no
+    upload is stored, or the stored path escapes the storage root.
+    """
+    application, _candidate_name, _job_title = get_application_with_details(
+        session=session,
+        application_id=application_id,
+        tenant_id=tenant_id,
+    )
+    if not application.resume_path:
+        raise NotFoundException("Resume not available for this application")
+
+    storage_root = get_settings().STORAGE_DIR.resolve()
+    file_path = (storage_root / application.resume_path).resolve()
+    if not file_path.is_relative_to(storage_root) or not file_path.is_file():
+        raise NotFoundException("Resume not available for this application")
+
+    media_type = _RESUME_MEDIA_TYPES.get(
+        file_path.suffix.lower(), "application/octet-stream"
+    )
+    return file_path, media_type
 
 
 def analyze_application(
