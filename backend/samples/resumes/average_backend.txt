@@ -1,0 +1,21 @@
+Priya Nair
+Backend Developer
+priya.nair@example.com
+
+Summary
+Backend developer with 3 years of experience writing Python web services.
+
+Experience
+Backend Developer, Maple Retail (2023 - present)
+- Maintains a Django storefront and the internal reporting tools.
+- Writes REST endpoints and PostgreSQL queries for the ordering team.
+- Uses Docker for local development and small deployments.
+
+Junior Developer, Bright Apprenticeship (2022 - 2023)
+- Fixed bugs in a Python reporting service and wrote the first tests for it.
+
+Skills
+Python, Django, PostgreSQL, REST, Git, Docker
+
+Education
+B.Sc. Information Technology, University of Pune

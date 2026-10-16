@@ -1,0 +1,26 @@
+Jordan Reyes
+Senior Backend Engineer
+jordan.reyes@example.com | Portland, OR
+
+Summary
+Backend engineer with 7 years building high-throughput services in Python and
+FastAPI. Comfortable owning a service end to end, from schema design to on-call.
+
+Experience
+Staff Backend Engineer, Northwind Systems (2021 - present)
+- Led the migration of the billing service to Python and FastAPI, cutting p95
+  latency by 40%.
+- Designed an event pipeline on PostgreSQL and Kafka handling 12k messages per
+  second.
+- Packaged services with Docker and deployed them to Kubernetes.
+
+Senior Software Engineer, Cedar Labs (2018 - 2021)
+- Built REST and gRPC APIs used by more than 30 internal teams.
+- Mentored four engineers and ran the backend hiring loop.
+
+Skills
+Python, FastAPI, PostgreSQL, SQLAlchemy, Redis, Celery, Docker, Kubernetes,
+Kafka, AWS
+
+Education
+B.S. Computer Science, Oregon State University

@@ -1,0 +1,22 @@
+Marco Bianchi
+Frontend Engineer
+marco.bianchi@example.com
+
+Summary
+Frontend engineer with 4 years building accessible React interfaces.
+
+Experience
+Frontend Engineer, Lantern Studio (2022 - present)
+- Built a component library in React and TypeScript with Tailwind CSS.
+- Improved Lighthouse performance scores from 62 to 96 on the marketing site.
+- Works closely with designers to ship responsive, accessible pages.
+
+Web Developer, Freelance (2020 - 2022)
+- Delivered landing pages and small React apps for local businesses.
+
+Skills
+JavaScript, TypeScript, React, Next.js, Tailwind CSS, HTML, CSS, Figma,
+Accessibility
+
+Education
+B.A. Graphic Design, University of Bologna
