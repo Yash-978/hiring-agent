@@ -168,6 +168,8 @@ async def analyze_application(
             application_id=id,
             resume_text=resume_text,
             user_id=current_user.id,
+            resume_bytes=content,
+            resume_content_type=file.content_type,
         )
     except NotFoundException:
         raise HTTPException(

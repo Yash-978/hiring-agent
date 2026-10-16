@@ -2,7 +2,8 @@ from typing import Any
 from fastapi.testclient import TestClient
 from sqlmodel import Session, select
 
-from app.models import Approval, ApprovalActionType, ApprovalStatus, AuditLog
+from app.config import get_settings
+from app.models import Application, Approval, ApprovalActionType, ApprovalStatus, AuditLog
 
 # A resume long enough to pass the 200-character minimum that also contains the
 # exact evidence quotes the fake LLM client returns, so verification succeeds.
@@ -274,6 +275,22 @@ def test_analyze_application_success(
     assert len(criteria) == 4
     assert all(c["evidence_verified"] for c in criteria)
 
+    # Verify the full analysis bundle is stored on the Application itself
+    stored = session.get(Application, app_id)
+    assert stored is not None
+    assert stored.analysis is not None
+    assert stored.analysis["score"] == 90.0
+    assert stored.analysis["prompt_version"] == "resume_analysis_v1"
+    assert stored.analysis["model"] == "fake"
+    assert stored.analysis["flags"] == []
+    assert stored.analysis["breakdown"]["must_have"]["ratio"] == 1.0
+
+    # The original upload is saved under STORAGE_DIR with a server-made name
+    assert stored.resume_path == f"tenants/{tenant_a['tenant'].id}/applications/{app_id}/resume.txt"
+    saved = get_settings().STORAGE_DIR / stored.resume_path
+    assert saved.exists()
+    assert saved.read_bytes() == LONG_RESUME.encode("utf-8")
+
     # Verify audit log entries
     audits = session.exec(
         select(AuditLog).where(
@@ -402,6 +419,7 @@ def test_analyze_application_llm_failure_creates_no_approval(
 def test_analyze_application_cross_tenant_isolation(
     two_tenants: dict[str, dict[str, Any]],
     client: TestClient,
+    session: Session,
 ) -> None:
     tenant_a = two_tenants["tenant_a"]
     tenant_b = two_tenants["tenant_b"]
@@ -430,6 +448,12 @@ def test_analyze_application_cross_tenant_isolation(
         files=files,
     )
     assert resp.status_code == 404
+
+    # Nothing was stored by the rejected cross-tenant request
+    stored = session.get(Application, app["id"])
+    assert stored is not None
+    assert stored.analysis is None
+    assert stored.resume_path is None
 
 
 def test_get_application_audit_happy_path(
@@ -654,3 +678,62 @@ def test_analyze_application_unverified_evidence_counts_as_unknown(
     assert payload["analysis"]["criteria"][0]["evidence_verified"] is False
     # Unverified positive verdict is treated as unknown: 55.0 not 90.0.
     assert payload["score"] == 55.0
+
+
+def test_analyze_application_ignores_client_filename(
+    two_tenants: dict[str, dict[str, Any]],
+    client: TestClient,
+    session: Session,
+) -> None:
+    """The stored upload uses a server-made name, never the client filename."""
+    tenant_a = two_tenants["tenant_a"]
+
+    cand = client.post(
+        "/candidates",
+        headers=tenant_a["headers"],
+        json={"full_name": "Alice Smith", "email": "alice@example.com"},
+    ).json()
+    job = client.post(
+        "/jobs",
+        headers=tenant_a["headers"],
+        json={"title": "Backend Engineer", "description": "Python, FastAPI, Docker"},
+    ).json()
+    app = client.post(
+        "/applications",
+        headers=tenant_a["headers"],
+        json={"candidate_id": cand["id"], "job_id": job["id"]},
+    ).json()
+
+    # A traversal-style filename must not influence where the file lands.
+    files = {"file": ("../../evil.exe", LONG_RESUME, "text/plain")}
+    resp = client.post(
+        f"/applications/{app['id']}/analyze",
+        headers=tenant_a["headers"],
+        files=files,
+    )
+    assert resp.status_code == 200
+
+    stored = session.get(Application, app["id"])
+    assert stored is not None
+    assert stored.resume_path == (
+        f"tenants/{tenant_a['tenant'].id}/applications/{app['id']}/resume.txt"
+    )
+    saved = get_settings().STORAGE_DIR / stored.resume_path
+    assert saved.exists()
+    assert saved.name == "resume.txt"
+
+
+def test_resume_extension_maps_known_content_types() -> None:
+    """Only whitelisted content types produce a real extension."""
+    from app.services.application_service import _resume_extension
+
+    assert _resume_extension("application/pdf") == "pdf"
+    assert _resume_extension("text/plain; charset=utf-8") == "txt"
+    assert (
+        _resume_extension(
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        )
+        == "docx"
+    )
+    assert _resume_extension("application/octet-stream") == "bin"
+    assert _resume_extension(None) == "bin"

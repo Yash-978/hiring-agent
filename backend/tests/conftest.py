@@ -1,4 +1,5 @@
 import os
+import tempfile
 from collections.abc import Generator
 from typing import Any
 # pyrefly: ignore [missing-import]
@@ -9,9 +10,10 @@ from sqlmodel import Session, SQLModel, create_engine
 # pyrefly: ignore [missing-import]
 from sqlmodel.pool import StaticPool    
 
-# Ensure tests run against in-memory SQLite
+# Ensure tests run against in-memory SQLite and write uploads to a temp dir
 os.environ["DATABASE_URL"] = "sqlite://"        
 os.environ["LLM_PROVIDER"] = "fake"
+os.environ["STORAGE_DIR"] = tempfile.mkdtemp(prefix="hiring-agent-storage-")
 
 from app.config import get_settings
 get_settings.cache_clear()

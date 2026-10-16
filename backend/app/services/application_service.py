@@ -1,5 +1,6 @@
 from sqlmodel import Session, select
 
+from app.config import get_settings
 from app.exceptions import NotFoundException
 from app.models import (
     Application,
@@ -26,6 +27,43 @@ from app.agents import (
 )
 
 MIN_RESUME_CHARS = 200
+
+# Server-chosen extensions keyed by the content types we accept. The client's
+# filename is never trusted; the stored name is always "resume.<ext>".
+_RESUME_EXTENSIONS = {
+    "application/pdf": "pdf",
+    "text/plain": "txt",
+    "application/msword": "doc",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document": "docx",
+}
+
+
+def _resume_extension(content_type: str | None) -> str:
+    """Return a safe file extension for the given content type."""
+    normalized = (content_type or "").split(";")[0].strip().lower()
+    return _RESUME_EXTENSIONS.get(normalized, "bin")
+
+
+def _save_resume(
+    tenant_id: int,
+    application_id: int,
+    content: bytes,
+    content_type: str | None,
+) -> str:
+    """Save the original upload under STORAGE_DIR and return its relative path.
+
+    The path is tenant-scoped and uses a server-made filename, so a crafted
+    client filename can never escape the storage root.
+    """
+    storage_root = get_settings().STORAGE_DIR
+    target_dir = (
+        storage_root / "tenants" / str(tenant_id) / "applications" / str(application_id)
+    )
+    target_dir.mkdir(parents=True, exist_ok=True)
+    file_path = target_dir / f"resume.{_resume_extension(content_type)}"
+    file_path.write_bytes(content)
+    # Store a portable POSIX-style relative path (forward slashes on every OS).
+    return file_path.relative_to(storage_root).as_posix()
 
 
 def create_application(
@@ -118,6 +156,8 @@ def analyze_application(
     application_id: int,
     resume_text: str,
     user_id: int,
+    resume_bytes: bytes = b"",
+    resume_content_type: str | None = None,
 ) -> tuple[Application, Candidate, Job, ResumeAnalysisResult]:
     """Analyze application resume, create approval, and log audit entries."""
     application, candidate_name, job_title = get_application_with_details(
@@ -192,6 +232,15 @@ def analyze_application(
         raise
 
     analysis = result.analysis
+
+    # Persist the original upload locally and store the full analysis bundle.
+    application.resume_path = _save_resume(
+        tenant_id=tenant_id,
+        application_id=application.id,
+        content=resume_bytes,
+        content_type=resume_content_type,
+    )
+    application.analysis = result.model_dump()
 
     # Update application with the deterministic score and a short reasoning line
     application.status = ApplicationStatus.ANALYZED.value

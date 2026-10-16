@@ -1,6 +1,7 @@
 from datetime import datetime, timezone
 from enum import Enum
-from sqlalchemy import Column, String
+from typing import Any
+from sqlalchemy import Column, JSON, String
 from sqlmodel import Field, SQLModel
 
 
@@ -27,6 +28,12 @@ class Application(SQLModel, table=True):
     )
     score: float | None = Field(default=None)
     score_reasoning: str | None = Field(default=None)
+    # Full resume analysis bundle (analysis, score, breakdown, flags, model,
+    # prompt_version) and the stored upload path relative to STORAGE_DIR.
+    analysis: dict[str, Any] | None = Field(
+        default=None, sa_column=Column(JSON, nullable=True)
+    )
+    resume_path: str | None = Field(default=None)
     created_at: datetime = Field(
         default_factory=lambda: datetime.now(timezone.utc)
     )

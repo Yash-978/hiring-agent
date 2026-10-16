@@ -9,6 +9,9 @@ class Settings(BaseSettings):
     LLM_PROVIDER: str = "fake"
     GEMINI_API_KEY: str = ""
     GEMINI_MODEL: str = "gemini-2.5-flash"
+    # Absolute directory for locally stored uploads, resolved from the backend
+    # folder so it never resolves to a nested "backend/backend/storage" path.
+    STORAGE_DIR: Path = Path(__file__).resolve().parent.parent / "storage"
 
     model_config = SettingsConfigDict(
         env_file=Path(__file__).resolve().parent.parent / ".env",
