@@ -5,6 +5,7 @@ import argparse
 import os
 import sys
 from pathlib import Path
+from typing import Any
 
 # Add backend to path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -13,14 +14,49 @@ from sqlmodel import Session, create_engine, SQLModel
 from app.db import create_db_and_tables
 from app.models import Tenant, User, UserRole, Job, Candidate, Application, ApplicationStatus
 from app.services.auth_service import hash_password
+from app.services.job_service import normalize_title
 
 SAMPLES_DIR = Path(__file__).resolve().parent.parent / "samples" / "resumes"
 
+# One demo job per category, each with explicit requirements so the scoring gate
+# and the hard-gap caps have something real to judge against. The "samples" key
+# names the resume files (without .txt) that belong to that job.
+DEMO_JOBS: list[dict[str, Any]] = [
+    {
+        "title": "Senior Backend Engineer",
+        "description": (
+            "We are looking for a Senior Backend Engineer with strong Python skills. "
+            "You will own services end to end, from schema design to on-call. "
+            "Required: Python, FastAPI, PostgreSQL. "
+            "Nice to have: Redis, Celery, Docker, Kubernetes."
+        ),
+        "must_have_skills": ["Python", "FastAPI", "PostgreSQL"],
+        "nice_to_have_skills": ["Redis", "Celery", "Docker", "Kubernetes"],
+        "min_years_experience": 5.0,
+        "samples": ["strong_backend", "average_backend"],
+    },
+    {
+        "title": "Mobile App Developer",
+        "description": (
+            "We are hiring a Mobile App Developer to build our first mobile client. "
+            "You will ship features in React Native against our REST APIs. "
+            "Required: React Native, TypeScript, REST APIs. "
+            "Nice to have: Swift, Kotlin, Firebase."
+        ),
+        "must_have_skills": ["React Native", "TypeScript", "REST APIs"],
+        "nice_to_have_skills": ["Swift", "Kotlin", "Firebase"],
+        "min_years_experience": 3.0,
+        "samples": ["frontend_only", "non_technical"],
+    },
+]
 
-def read_sample_resumes(samples_dir: Path | None = None) -> list[tuple[str, str, str]]:
-    """Return (full_name, email, resume_text) for each sample resume file."""
+
+def read_sample_resume_entries(
+    samples_dir: Path | None = None,
+) -> list[tuple[str, str, str, str]]:
+    """Return (stem, full_name, email, resume_text) for each sample resume file."""
     directory = samples_dir if samples_dir is not None else SAMPLES_DIR
-    rows: list[tuple[str, str, str]] = []
+    entries: list[tuple[str, str, str, str]] = []
     for path in sorted(directory.glob("*.txt")):
         text = path.read_text(encoding="utf-8")
         lines = [line.strip() for line in text.splitlines() if line.strip()]
@@ -29,38 +65,95 @@ def read_sample_resumes(samples_dir: Path | None = None) -> list[tuple[str, str,
             (token.strip(".,;:()<>") for token in text.split() if "@" in token and "." in token),
             f"{path.stem}@example.com",
         )
-        rows.append((full_name, email, text))
-    return rows
+        entries.append((path.stem, full_name, email, text))
+    return entries
+
+
+def read_sample_resumes(samples_dir: Path | None = None) -> list[tuple[str, str, str]]:
+    """Return (full_name, email, resume_text) for each sample resume file."""
+    return [
+        (full_name, email, resume_text)
+        for _stem, full_name, email, resume_text in read_sample_resume_entries(samples_dir)
+    ]
+
+
+def _attach_sample(
+    session: Session,
+    tenant_id: int,
+    job_id: int,
+    full_name: str,
+    email: str,
+    resume_text: str,
+) -> Candidate:
+    """Create a candidate from a sample resume and apply them to a job."""
+    candidate = Candidate(
+        tenant_id=tenant_id,
+        full_name=full_name,
+        email=email,
+        resume_text=resume_text,
+    )
+    session.add(candidate)
+    session.flush()
+    assert candidate.id is not None
+    session.add(
+        Application(
+            tenant_id=tenant_id,
+            candidate_id=candidate.id,
+            job_id=job_id,
+            status=ApplicationStatus.NEW,
+        )
+    )
+    return candidate
 
 
 def seed_sample_candidates(
     session: Session, tenant_id: int, job_id: int
 ) -> list[Candidate]:
-    """Load the sample resumes from disk as candidates for the demo job."""
-    candidates: list[Candidate] = []
-    for full_name, email, resume_text in read_sample_resumes():
-        candidate = Candidate(
+    """Load the sample resumes from disk as candidates for one demo job."""
+    return [
+        _attach_sample(session, tenant_id, job_id, full_name, email, resume_text)
+        for full_name, email, resume_text in read_sample_resumes()
+    ]
+
+
+def seed_demo_jobs(
+    session: Session, tenant_id: int
+) -> list[tuple[Job, list[Candidate]]]:
+    """Create one demo job per category and attach the matching sample resumes."""
+    entries = {
+        stem: (full_name, email, resume_text)
+        for stem, full_name, email, resume_text in read_sample_resume_entries()
+    }
+
+    seeded: list[tuple[Job, list[Candidate]]] = []
+    for spec in DEMO_JOBS:
+        job = Job(
             tenant_id=tenant_id,
-            full_name=full_name,
-            email=email,
-            resume_text=resume_text,
+            title=spec["title"],
+            title_key=normalize_title(spec["title"]),
+            description=spec["description"],
+            must_have_skills=list(spec["must_have_skills"]),
+            nice_to_have_skills=list(spec["nice_to_have_skills"]),
+            min_years_experience=spec["min_years_experience"],
         )
-        session.add(candidate)
+        session.add(job)
         session.flush()
-        assert candidate.id is not None
-        session.add(
-            Application(
-                tenant_id=tenant_id,
-                candidate_id=candidate.id,
-                job_id=job_id,
-                status=ApplicationStatus.NEW,
-            )
-        )
-        candidates.append(candidate)
-    return candidates
+        assert job.id is not None
+
+        candidates = [
+            _attach_sample(session, tenant_id, job.id, *entries[stem])
+            for stem in spec["samples"]
+        ]
+        seeded.append((job, candidates))
+    return seeded
 
 
 def main(with_samples: bool = False) -> None:
+    """Seed the demo tenant with one job per category and its sample candidates.
+
+    ``with_samples`` is kept for backwards compatibility: the sample resumes are
+    always seeded now, because they are what makes the demo meaningful.
+    """
     database_url = os.getenv("DATABASE_URL", "sqlite:///demo.db")
     seed_password = os.getenv("SEED_PASSWORD", "demo123")
 
@@ -88,91 +181,25 @@ def main(with_samples: bool = False) -> None:
         session.flush()
         assert user.id is not None
 
-        # Create job
-        job = Job(
-            tenant_id=tenant.id,
-            title="Senior Backend Engineer",
-            description=(
-                "We are looking for a Senior Backend Engineer with strong Python skills. "
-                "You will work on our hiring platform, building APIs, integrating with AI agents, "
-                "and ensuring data integrity across the hiring pipeline. "
-                "Required: Python, FastAPI, PostgreSQL, SQLAlchemy. "
-                "Nice to have: Redis, Celery, Docker, Kubernetes."
-            ),
-        )
-        session.add(job)
-        session.flush()
-        assert job.id is not None
-
-        # Create candidates
-        cand1 = Candidate(
-            tenant_id=tenant.id,
-            full_name="Alice Smith",
-            email="alice.smith@example.com",
-            resume_text=(
-                "Alice Smith\n"
-                "Senior Python Developer with 7 years experience.\n"
-                "Skills: Python, FastAPI, PostgreSQL, SQLAlchemy, Redis, Docker, Kubernetes.\n"
-                "Experience: Built scalable APIs, microservices, and data pipelines.\n"
-                "Education: BS Computer Science, Stanford University."
-            ),
-        )
-        session.add(cand1)
-
-        cand2 = Candidate(
-            tenant_id=tenant.id,
-            full_name="Bob Johnson",
-            email="bob.johnson@example.com",
-            resume_text=(
-                "Bob Johnson\n"
-                "Backend Engineer with 4 years experience.\n"
-                "Skills: Python, Django, PostgreSQL, REST APIs, Git, CI/CD.\n"
-                "Experience: Developed web applications and internal tools.\n"
-                "Education: MS Software Engineering, MIT."
-            ),
-        )
-        session.add(cand2)
-        session.flush()
-        assert cand1.id is not None
-        assert cand2.id is not None
-
-        # Create applications
-        app1 = Application(
-            tenant_id=tenant.id,
-            candidate_id=cand1.id,
-            job_id=job.id,
-            status=ApplicationStatus.NEW,
-        )
-        session.add(app1)
-
-        app2 = Application(
-            tenant_id=tenant.id,
-            candidate_id=cand2.id,
-            job_id=job.id,
-            status=ApplicationStatus.NEW,
-        )
-        session.add(app2)
-
-        sample_candidates: list[Candidate] = []
-        if with_samples:
-            sample_candidates = seed_sample_candidates(
-                session, tenant_id=tenant.id, job_id=job.id
-            )
-
+        # One job per category, each with explicit requirements, and the sample
+        # resumes attached to the job they belong to.
+        seeded = seed_demo_jobs(session, tenant_id=tenant.id)
         session.commit()
 
         print(f"[OK] Created tenant: {tenant.name} (id={tenant.id})")
         print(f"[OK] Created admin user: {user.email} (id={user.id})")
-        print(f"[OK] Created job: {job.title} (id={job.id})")
-        print(f"[OK] Created candidate: {cand1.full_name} (id={cand1.id})")
-        print(f"[OK] Created candidate: {cand2.full_name} (id={cand2.id})")
-        print(f"[OK] Created application for {cand1.full_name}")
-        print(f"[OK] Created application for {cand2.full_name}")
-        for sample in sample_candidates:
+        for job, candidates in seeded:
             print(
-                f"[OK] Created candidate from sample: {sample.full_name} "
-                f"({sample.email}, id={sample.id})"
+                f"[OK] Created job: {job.title} (id={job.id}, "
+                f"must-have={job.must_have_skills}, "
+                f"nice-to-have={job.nice_to_have_skills}, "
+                f"min_years={job.min_years_experience})"
             )
+            for candidate in candidates:
+                print(
+                    f"[OK] Created candidate: {candidate.full_name} "
+                    f"({candidate.email}, id={candidate.id}) -> {job.title}"
+                )
         print(f"\nDemo data seeded successfully!")
         print(f"Login with: admin@demo.test / {seed_password}")
 
@@ -182,7 +209,10 @@ if __name__ == "__main__":
     parser.add_argument(
         "--with-samples",
         action="store_true",
-        help="Also load the sample resumes as candidates for the demo job.",
+        help=(
+            "Deprecated: the sample resumes are always loaded as candidates for "
+            "the matching demo job."
+        ),
     )
     args = parser.parse_args()
     main(with_samples=args.with_samples)

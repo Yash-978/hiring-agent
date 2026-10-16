@@ -19,6 +19,7 @@ from app.models import (
     User,
     UserRole,
 )
+from app.services.job_service import normalize_title
 
 BACKEND_DIR = Path(__file__).resolve().parent.parent
 SCRIPTS_DIR = BACKEND_DIR / "scripts"
@@ -145,6 +146,79 @@ def test_seed_sample_candidates_creates_candidates_and_applications(
     ).all()
     assert len(apps) == 4
     assert {a.candidate_id for a in apps} == {c.id for c in stored}
+
+
+# --- seed.py demo jobs (TASK 8) -------------------------------------------
+
+
+def _seed_demo_tenant(session: Session) -> Tenant:
+    tenant = Tenant(name="Demo Jobs Co")
+    session.add(tenant)
+    session.commit()
+    session.refresh(tenant)
+    assert tenant.id is not None
+    return tenant
+
+
+def test_seed_demo_jobs_creates_one_job_per_category_with_requirements(
+    session: Session,
+) -> None:
+    seed = _load_script("seed")
+    tenant = _seed_demo_tenant(session)
+
+    seeded = seed.seed_demo_jobs(session, tenant_id=tenant.id)
+    session.commit()
+
+    assert [job.title for job, _candidates in seeded] == [
+        "Senior Backend Engineer",
+        "Mobile App Developer",
+    ]
+
+    jobs = session.exec(select(Job).where(Job.tenant_id == tenant.id)).all()
+    assert len(jobs) == 2
+    for job in jobs:
+        # The scoring gate needs at least three must-have skills to judge a job.
+        assert len(job.must_have_skills) >= 3
+        assert job.nice_to_have_skills
+        assert job.min_years_experience is not None
+        assert job.min_years_experience > 0
+        # title_key is the casefolded title, so the unique index can hold.
+        assert job.title_key == normalize_title(job.title)
+
+
+def test_seed_demo_jobs_attaches_samples_to_the_right_jobs(session: Session) -> None:
+    seed = _load_script("seed")
+    tenant = _seed_demo_tenant(session)
+
+    seed.seed_demo_jobs(session, tenant_id=tenant.id)
+    session.commit()
+
+    jobs = session.exec(select(Job).where(Job.tenant_id == tenant.id)).all()
+    assert {job.title for job in jobs} == {
+        "Senior Backend Engineer",
+        "Mobile App Developer",
+    }
+
+    attached: dict[str, set[str]] = {}
+    for job in jobs:
+        apps = session.exec(
+            select(Application).where(Application.job_id == job.id)
+        ).all()
+        names: set[str] = set()
+        for app in apps:
+            candidate = session.get(Candidate, app.candidate_id)
+            assert candidate is not None
+            names.add(candidate.full_name)
+        attached[job.title] = names
+
+    assert attached["Senior Backend Engineer"] == {"Jordan Reyes", "Priya Nair"}
+    assert attached["Mobile App Developer"] == {"Marco Bianchi", "Dana Whitfield"}
+
+    stored = session.exec(
+        select(Candidate).where(Candidate.tenant_id == tenant.id)
+    ).all()
+    assert len(stored) == 4
+    assert all(candidate.resume_text for candidate in stored)
 
 
 # --- dedupe_jobs.py (TASK 4) ----------------------------------------------
