@@ -20,6 +20,8 @@ class LLMError(Exception):
 class LLMClient(ABC):
     """Protocol for LLM clients that can generate structured JSON output."""
 
+    model_name: str = "unknown"
+
     @abstractmethod
     def generate_json(
         self, system: str, prompt: str, schema: type[T]
@@ -30,6 +32,8 @@ class LLMClient(ABC):
 
 class FakeLLMClient(LLMClient):
     """Deterministic fake client for testing."""
+
+    model_name: str = "fake"
 
     def generate_json(
         self, system: str, prompt: str, schema: type[T]
@@ -46,11 +50,51 @@ class FakeLLMClient(LLMClient):
         if schema.__name__ == "ResumeAnalysis":
             return schema.model_validate(
                 {
-                    "skills": ["Python", "FastAPI", "SQL"],
-                    "years_experience": 5.0,
-                    "summary": "Experienced backend developer",
-                    "score": 85,
-                    "reasoning": "Strong match for required skills",
+                    "candidate": {
+                        "full_name": "Alice Smith",
+                        "email": "alice@example.com",
+                        "phone": None,
+                        "location": None,
+                        "current_title": "Backend Engineer",
+                        "total_years_experience": 5.0,
+                        "education": ["BSc Computer Science"],
+                        "skills": ["Python", "FastAPI", "Docker"],
+                    },
+                    "criteria": [
+                        {
+                            "criterion": "Python",
+                            "kind": "must_have",
+                            "verdict": "met",
+                            "evidence": "Python and FastAPI",
+                            "note": "Uses Python daily.",
+                        },
+                        {
+                            "criterion": "FastAPI",
+                            "kind": "must_have",
+                            "verdict": "met",
+                            "evidence": "Python and FastAPI",
+                            "note": "Built FastAPI services.",
+                        },
+                        {
+                            "criterion": "Docker",
+                            "kind": "nice_to_have",
+                            "verdict": "partial",
+                            "evidence": "Docker",
+                            "note": "Some Docker exposure.",
+                        },
+                        {
+                            "criterion": "5 years of experience",
+                            "kind": "experience",
+                            "verdict": "met",
+                            "evidence": "5 years Python",
+                            "note": "Meets the minimum.",
+                        },
+                    ],
+                    "strengths": ["Strong Python skills"],
+                    "concerns": ["Limited Kubernetes experience"],
+                    "questions_for_candidate": ["Describe your largest FastAPI project."],
+                    "recommendation": "shortlist",
+                    "confidence": "medium",
                 }
             )
         if schema.__name__ == "OfferDraft":
@@ -70,6 +114,7 @@ class GeminiLLMClient(LLMClient):
         settings = get_settings()
         self._client = GenAIClient(api_key=settings.GEMINI_API_KEY)
         self._model = settings.GEMINI_MODEL
+        self.model_name = settings.GEMINI_MODEL
 
     def generate_json(
         self, system: str, prompt: str, schema: type[T]

@@ -9,6 +9,16 @@ from app.models import Approval, ApprovalActionType, ApprovalStatus, AuditLog, L
 from app.services import approval_service
 from tests.conftest import create_tenant_user
 
+# Resume text long enough to pass the 200-character minimum for analysis.
+LONG_RESUME = (
+    "Alice Smith\n"
+    "Email: alice@example.com\n"
+    "Backend Engineer with 5 years Python experience building APIs.\n"
+    "Built services with Python and FastAPI and shipped them with Docker.\n"
+    "Bachelor of Science in Computer Science from a state university.\n"
+    "Worked with PostgreSQL, Redis and CI pipelines across several teams.\n"
+)
+
 
 def test_letter_flow_requires_approved_shortlist(
     two_tenants: dict[str, dict[str, Any]],
@@ -41,7 +51,7 @@ def test_letter_flow_requires_approved_shortlist(
     app_id = app["id"]
 
     # Upload resume and analyze
-    files = {"file": ("resume.txt", "Alice Smith\n5 years Python, FastAPI, SQL", "text/plain")}
+    files = {"file": ("resume.txt", LONG_RESUME, "text/plain")}
     resp = client.post(
         f"/applications/{app_id}/analyze",
         headers=tenant_a["headers"],
@@ -92,7 +102,7 @@ def test_letter_generate_and_download_flow(
     app_id = app["id"]
 
     # Upload resume and analyze
-    files = {"file": ("resume.txt", "Bob Jones\n8 years Python, FastAPI, SQL", "text/plain")}
+    files = {"file": ("resume.txt", LONG_RESUME, "text/plain")}
     resp = client.post(
         f"/applications/{app_id}/analyze",
         headers=tenant_a["headers"],
@@ -219,7 +229,7 @@ def test_cross_tenant_letter_isolation(
     ).json()
     app_id = app["id"]
 
-    files = {"file": ("resume.txt", "Carol White\nPython", "text/plain")}
+    files = {"file": ("resume.txt", LONG_RESUME, "text/plain")}
     client.post(f"/applications/{app_id}/analyze", headers=tenant_a["headers"], files=files)
 
     shortlist_approval = session.exec(
@@ -286,7 +296,7 @@ def test_download_before_approval_returns_403(
     ).json()
     app_id = app["id"]
 
-    files = {"file": ("resume.txt", "Dave Green\nPython", "text/plain")}
+    files = {"file": ("resume.txt", LONG_RESUME, "text/plain")}
     client.post(f"/applications/{app_id}/analyze", headers=tenant_a["headers"], files=files)
 
     shortlist_approval = session.exec(

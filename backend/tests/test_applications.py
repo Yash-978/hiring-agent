@@ -4,6 +4,17 @@ from sqlmodel import Session, select
 
 from app.models import Approval, ApprovalActionType, ApprovalStatus, AuditLog
 
+# A resume long enough to pass the 200-character minimum that also contains the
+# exact evidence quotes the fake LLM client returns, so verification succeeds.
+LONG_RESUME = (
+    "Alice Smith\n"
+    "Email: alice@example.com\n"
+    "Backend Engineer with 5 years Python experience building APIs.\n"
+    "Built services with Python and FastAPI and shipped them with Docker.\n"
+    "Bachelor of Science in Computer Science from a state university.\n"
+    "Worked with PostgreSQL, Redis and CI pipelines across several teams.\n"
+)
+
 
 def test_create_application_happy_path(
     two_tenants: dict[str, dict[str, Any]],
@@ -229,8 +240,7 @@ def test_analyze_application_success(
     app_id = app["id"]
 
     # Upload resume as TXT
-    resume_text = "Alice Smith\n5 years Python, FastAPI, SQL"
-    files = {"file": ("resume.txt", resume_text, "text/plain")}
+    files = {"file": ("resume.txt", LONG_RESUME, "text/plain")}
     resp = client.post(
         f"/applications/{app_id}/analyze",
         headers=tenant_a["headers"],
@@ -240,8 +250,8 @@ def test_analyze_application_success(
     data = resp.json()
     assert data["id"] == app_id
     assert data["status"] == "analyzed"
-    assert data["score"] == 85
-    assert data["score_reasoning"] == "Strong match for required skills"
+    assert data["score"] == 90.0
+    assert data["score_reasoning"] == "shortlist (confidence: medium)"
 
     # Verify exactly one pending shortlist approval was created
     approvals = session.exec(
@@ -254,7 +264,15 @@ def test_analyze_application_success(
         )
     ).all()
     assert len(approvals) == 1
-    assert approvals[0].payload["score"] == 85
+    payload = approvals[0].payload
+    assert payload["score"] == 90.0
+    assert payload["prompt_version"] == "resume_analysis_v1"
+    assert payload["model"] == "fake"
+    assert payload["flags"] == []
+    assert payload["breakdown"]["must_have"]["ratio"] == 1.0
+    criteria = payload["analysis"]["criteria"]
+    assert len(criteria) == 4
+    assert all(c["evidence_verified"] for c in criteria)
 
     # Verify audit log entries
     audits = session.exec(
@@ -273,7 +291,8 @@ def test_analyze_application_success(
         if (a.actor_type.value if hasattr(a.actor_type, "value") else a.actor_type) == "agent"
     )
     assert agent_audit.actor_name == "resume_agent"
-    assert agent_audit.details["score"] == 85
+    assert agent_audit.details["score"] == 90.0
+    assert agent_audit.details["recommendation"] == "shortlist"
 
 
 def test_analyze_application_bad_file_type(
@@ -348,7 +367,7 @@ def test_analyze_application_llm_failure_creates_no_approval(
 
     FakeLLMClient.generate_json = failing_generate  # type: ignore[assignment]
     try:
-        files = {"file": ("resume.txt", "Carol resume", "text/plain")}
+        files = {"file": ("resume.txt", LONG_RESUME, "text/plain")}
         resp = client.post(
             f"/applications/{app_id}/analyze",
             headers=tenant_a["headers"],
@@ -438,7 +457,7 @@ def test_get_application_audit_happy_path(
     app_id = app["id"]
 
     # Analyze to generate audit entries
-    files = {"file": ("resume.txt", "Eve\n5 years Python", "text/plain")}
+    files = {"file": ("resume.txt", LONG_RESUME, "text/plain")}
     client.post(
         f"/applications/{app_id}/analyze",
         headers=tenant_a["headers"],
@@ -492,3 +511,146 @@ def test_get_application_audit_cross_tenant_isolation(
     )
     assert cross_res.status_code == 404
     assert "not found" in cross_res.json()["detail"].lower()
+
+
+def test_analyze_application_short_resume_returns_422(
+    two_tenants: dict[str, dict[str, Any]],
+    client: TestClient,
+    session: Session,
+) -> None:
+    tenant_a = two_tenants["tenant_a"]
+
+    cand = client.post(
+        "/candidates",
+        headers=tenant_a["headers"],
+        json={"full_name": "Shorty", "email": "shorty@example.com"},
+    ).json()
+    job = client.post(
+        "/jobs",
+        headers=tenant_a["headers"],
+        json={"title": "Dev", "description": "Python"},
+    ).json()
+    app = client.post(
+        "/applications",
+        headers=tenant_a["headers"],
+        json={"candidate_id": cand["id"], "job_id": job["id"]},
+    ).json()
+
+    # Resume text below the 200-character minimum -> 422, no approval created.
+    files = {"file": ("resume.txt", "Too short", "text/plain")}
+    resp = client.post(
+        f"/applications/{app['id']}/analyze",
+        headers=tenant_a["headers"],
+        files=files,
+    )
+    assert resp.status_code == 422
+
+    approvals = session.exec(
+        select(Approval).where(
+            Approval.target_type == "application",
+            Approval.target_id == app["id"],
+        )
+    ).all()
+    assert approvals == []
+
+
+def test_analyze_application_flags_name_and_email_mismatch(
+    two_tenants: dict[str, dict[str, Any]],
+    client: TestClient,
+    session: Session,
+) -> None:
+    tenant_a = two_tenants["tenant_a"]
+
+    # The stored candidate differs from what the fake LLM extracts (Alice Smith).
+    cand = client.post(
+        "/candidates",
+        headers=tenant_a["headers"],
+        json={"full_name": "Bob Jones", "email": "bob@example.com"},
+    ).json()
+    job = client.post(
+        "/jobs",
+        headers=tenant_a["headers"],
+        json={"title": "Backend Engineer", "description": "Python, FastAPI"},
+    ).json()
+    app = client.post(
+        "/applications",
+        headers=tenant_a["headers"],
+        json={"candidate_id": cand["id"], "job_id": job["id"]},
+    ).json()
+
+    files = {"file": ("resume.txt", LONG_RESUME, "text/plain")}
+    resp = client.post(
+        f"/applications/{app['id']}/analyze",
+        headers=tenant_a["headers"],
+        files=files,
+    )
+    assert resp.status_code == 200
+
+    approval = session.exec(
+        select(Approval).where(
+            Approval.target_type == "application",
+            Approval.target_id == app["id"],
+        )
+    ).first()
+    assert approval is not None
+    assert set(approval.payload["flags"]) == {"name_mismatch", "email_mismatch"}
+
+
+def test_analyze_application_unverified_evidence_counts_as_unknown(
+    two_tenants: dict[str, dict[str, Any]],
+    client: TestClient,
+    session: Session,
+) -> None:
+    tenant_a = two_tenants["tenant_a"]
+
+    cand = client.post(
+        "/candidates",
+        headers=tenant_a["headers"],
+        json={"full_name": "Alice Smith", "email": "alice@example.com"},
+    ).json()
+    job = client.post(
+        "/jobs",
+        headers=tenant_a["headers"],
+        json={"title": "Backend Engineer", "description": "Python, FastAPI, Docker"},
+    ).json()
+    app = client.post(
+        "/applications",
+        headers=tenant_a["headers"],
+        json={"candidate_id": cand["id"], "job_id": job["id"]},
+    ).json()
+
+    from app.agents.llm import FakeLLMClient
+
+    original_generate = FakeLLMClient.generate_json
+
+    def patched_generate(self, system: str, prompt: str, schema: Any) -> Any:
+        result = original_generate(self, system, prompt, schema)
+        if schema.__name__ == "ResumeAnalysis":
+            # A quote that does not appear anywhere in the resume.
+            result.criteria[0].evidence = "a fabricated quote not in the resume"
+        return result
+
+    FakeLLMClient.generate_json = patched_generate  # type: ignore[assignment]
+    try:
+        files = {"file": ("resume.txt", LONG_RESUME, "text/plain")}
+        resp = client.post(
+            f"/applications/{app['id']}/analyze",
+            headers=tenant_a["headers"],
+            files=files,
+        )
+    finally:
+        FakeLLMClient.generate_json = original_generate  # type: ignore[assignment]
+
+    assert resp.status_code == 200
+
+    approval = session.exec(
+        select(Approval).where(
+            Approval.target_type == "application",
+            Approval.target_id == app["id"],
+        )
+    ).first()
+    assert approval is not None
+    payload = approval.payload
+    assert payload["analysis"]["criteria"][0]["evidence_verified"] is False
+    # Unverified positive verdict is treated as unknown: 55.0 not 90.0.
+    assert payload["score"] == 55.0

@@ -22,8 +22,10 @@ from app.agents import (
     get_llm_client,
     LLMError,
     OfferDraft,
-    ResumeAnalysis,
+    ResumeAnalysisResult,
 )
+
+MIN_RESUME_CHARS = 200
 
 
 def create_application(
@@ -116,7 +118,7 @@ def analyze_application(
     application_id: int,
     resume_text: str,
     user_id: int,
-) -> tuple[Application, Candidate, Job, ResumeAnalysis]:
+) -> tuple[Application, Candidate, Job, ResumeAnalysisResult]:
     """Analyze application resume, create approval, and log audit entries."""
     application, candidate_name, job_title = get_application_with_details(
         session=session,
@@ -131,9 +133,10 @@ def analyze_application(
 
     # Store resume text on candidate
     candidate = session.get(Candidate, application.candidate_id)
-    if candidate:
-        candidate.resume_text = resume_text
-        session.add(candidate)
+    if not candidate:
+        raise NotFoundException(f"Candidate {application.candidate_id} not found")
+    candidate.resume_text = resume_text
+    session.add(candidate)
 
     client = get_llm_client()
 
@@ -164,7 +167,16 @@ def analyze_application(
             session.add(job)
 
     try:
-        analysis = analyze_resume(client, resume_text, job.description)
+        result = analyze_resume(
+            client=client,
+            resume_text=resume_text,
+            job_description=job.description,
+            must_have_skills=job.must_have_skills,
+            nice_to_have_skills=job.nice_to_have_skills,
+            min_years_experience=job.min_years_experience,
+            candidate_name=candidate.full_name,
+            candidate_email=candidate.email,
+        )
     except LLMError as e:
         log_event(
             session=session,
@@ -179,24 +191,28 @@ def analyze_application(
         session.commit()
         raise
 
-    # Update application with score and reasoning
+    analysis = result.analysis
+
+    # Update application with the deterministic score and a short reasoning line
     application.status = ApplicationStatus.ANALYZED.value
-    application.score = float(analysis.score)
-    application.score_reasoning = analysis.reasoning
+    application.score = float(result.score)
+    application.score_reasoning = (
+        f"{analysis.recommendation} (confidence: {analysis.confidence})"
+    )
     session.add(application)
 
-    # Create pending shortlist approval
+    # Create pending shortlist approval carrying the full analysis bundle
     approval = request_approval(
         session=session,
         tenant_id=tenant_id,
         action_type=ApprovalActionType.SHORTLIST,
         target_type="application",
         target_id=application.id,
-        payload=analysis.model_dump(),
+        payload=result.model_dump(),
         requested_by=user_id,
     )
 
-    # Log audit for agent analysis
+    # Log audit for agent analysis (never log resume text or salaries)
     log_event(
         session=session,
         tenant_id=tenant_id,
@@ -206,9 +222,10 @@ def analyze_application(
         entity_type="application",
         entity_id=application.id,
         details={
-            "score": analysis.score,
-            "skills": analysis.skills,
-            "years_experience": analysis.years_experience,
+            "score": result.score,
+            "recommendation": analysis.recommendation,
+            "confidence": analysis.confidence,
+            "flags": result.flags,
             "approval_id": approval.id,
         },
     )
@@ -217,7 +234,7 @@ def analyze_application(
     session.refresh(application)
     session.refresh(candidate)
     session.refresh(job)
-    return application, candidate, job, analysis
+    return application, candidate, job, result
 
 
 def create_offer_draft(

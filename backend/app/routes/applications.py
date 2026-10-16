@@ -126,6 +126,20 @@ async def analyze_application(
             detail="File size exceeds 5 MB limit",
         )
 
+    # Verify the application exists and belongs to the caller's tenant before
+    # doing any parsing or LLM work. Cross-tenant callers get a 404.
+    try:
+        application_service.get_application_with_details(
+            session=session,
+            application_id=id,
+            tenant_id=current_user.tenant_id,
+        )
+    except NotFoundException:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Application {id} not found",
+        )
+
     if file.content_type == "application/pdf":
         try:
             pdf_reader = PdfReader(io.BytesIO(content))
@@ -137,6 +151,15 @@ async def analyze_application(
             )
     else:
         resume_text = content.decode("utf-8", errors="replace")
+
+    if len(resume_text.strip()) < application_service.MIN_RESUME_CHARS:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=(
+                "Resume text is too short to analyze "
+                f"(minimum {application_service.MIN_RESUME_CHARS} characters)"
+            ),
+        )
 
     try:
         app, candidate, job, _ = application_service.analyze_application(
