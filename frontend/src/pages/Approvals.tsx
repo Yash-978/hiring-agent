@@ -4,10 +4,11 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter, DialogDescription } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter, DialogDescription, DialogClose } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { AnalysisView } from "@/components/AnalysisView";
 import { Loader2, AlertCircle, CheckCircle, Clock, User as UserIcon, FileText, Shield, AlertTriangle } from "lucide-react";
 import { toast } from "sonner";
 import { useAuth } from "@/auth/useAuth";
@@ -208,7 +209,10 @@ function ApprovalCard({
         <div className="border-t pt-4">
           <Label className="font-medium text-muted-foreground">Details</Label>
           {approval.action_type === "shortlist" ? (
-            renderShortlistDetails(approval.payload)
+            <>
+              <AnalysisView applicationId={approval.target_id} />
+              <div className="mt-4">{renderShortlistDetails(approval.payload)}</div>
+            </>
           ) : approval.action_type === "offer_letter" ? (
             renderOfferLetterDetails(approval.payload)
           ) : (
@@ -274,7 +278,6 @@ function ApprovalCard({
               <DialogTrigger asChild>
                 <Button
                   variant="destructive"
-                  onClick={() => onReject("")}
                   disabled={isApproving || isRejecting}
                   className="flex-1 sm:flex-none"
                 >
@@ -336,9 +339,11 @@ function ApproveDialogContent({ onConfirm, isLoading }: { onConfirm: (note?: str
           </div>
         </div>
         <DialogFooter>
-          <Button type="button" variant="outline" onClick={() => onConfirm("")} disabled={isLoading}>
-            Cancel
-          </Button>
+          <DialogClose asChild>
+            <Button type="button" variant="outline" disabled={isLoading}>
+              Cancel
+            </Button>
+          </DialogClose>
           <Button type="submit" disabled={isLoading}>
             {isLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
             Approve
@@ -376,9 +381,11 @@ function RejectDialogContent({ onConfirm, isLoading }: { onConfirm: (note: strin
           </div>
         </div>
         <DialogFooter>
-          <Button type="button" variant="outline" onClick={() => onConfirm("")} disabled={isLoading}>
-            Cancel
-          </Button>
+          <DialogClose asChild>
+            <Button type="button" variant="outline" disabled={isLoading}>
+              Cancel
+            </Button>
+          </DialogClose>
           <Button type="submit" variant="destructive" disabled={isLoading || !note.trim()}>
             {isLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
             Reject

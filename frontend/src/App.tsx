@@ -6,7 +6,7 @@ import { Login } from "./pages/Login";
 import { Candidates } from "./pages/Candidates";
 import { CandidateDetail } from "./pages/CandidateDetail";
 import { JobCompare } from "./pages/JobCompare";
-import { ApprovalsPage } from "./pages/ApprovalsPage";
+import { Approvals } from "./pages/Approvals";
 
 export function App() {
   return (
@@ -18,7 +18,7 @@ export function App() {
             <Route path="/candidates" element={<Candidates />} />
             <Route path="/candidates/:id" element={<CandidateDetail />} />
             <Route path="/jobs/:id/compare" element={<JobCompare />} />
-            <Route path="/approvals" element={<ApprovalsPage />} />
+            <Route path="/approvals" element={<Approvals />} />
           </Route>
         </Route>
         <Route path="/" element={<Navigate to="/candidates" replace />} />
