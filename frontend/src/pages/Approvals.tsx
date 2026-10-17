@@ -10,17 +10,13 @@ import {
   DialogContent,
   DialogHeader,
   DialogTitle,
-  DialogDescription,
-  DialogFooter,
-  DialogClose,
 } from "@/components/ui/dialog";
-import { Textarea } from "@/components/ui/textarea";
+import { DecisionDialog } from "@/components/DecisionDialog";
 import { Label } from "@/components/ui/label";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Skeleton } from "@/components/ui/skeleton";
 import { AnalysisView } from "@/components/AnalysisView";
 import {
-  Loader2,
   AlertCircle,
   CheckCircle,
   Clock,
@@ -198,11 +194,13 @@ export function Approvals() {
   const [selectedApprovalId, setSelectedApprovalId] = useState<number | null>(null);
   const [mobileDetailOpen, setMobileDetailOpen] = useState(false);
 
-  // Dialog states for Approve/Reject
-  const [approveDialogOpen, setApproveDialogOpen] = useState(false);
-  const [rejectDialogOpen, setRejectDialogOpen] = useState(false);
-  const [decisionNote, setDecisionNote] = useState("");
-  const [actionError, setActionError] = useState<string | null>(null);
+  const [decisionState, setDecisionState] = useState<{
+    open: boolean;
+    mode: "approve" | "reject";
+  }>({
+    open: false,
+    mode: "approve",
+  });
 
   const { data: counts } = useQuery({
     queryKey: ["approvals-counts"],
@@ -245,9 +243,6 @@ export function Approvals() {
     mutationFn: ({ id, note }: { id: number; note?: string }) => approveApproval(id, note),
     onSuccess: (_, variables) => {
       toast.success("Approved successfully");
-      setApproveDialogOpen(false);
-      setDecisionNote("");
-      setActionError(null);
       nextItemToSelect(variables.id);
       queryClient.invalidateQueries({ queryKey: ["approvals"] });
       queryClient.invalidateQueries({ queryKey: ["approvals-counts"] });
@@ -255,7 +250,6 @@ export function Approvals() {
       queryClient.invalidateQueries({ queryKey: ["candidates"] });
     },
     onError: (err: Error) => {
-      setActionError(err.message || "Failed to approve");
       if (err.message.includes("409") || err.message.includes("already decided")) {
         queryClient.invalidateQueries({ queryKey: ["approvals"] });
         queryClient.invalidateQueries({ queryKey: ["approvals-counts"] });
@@ -267,9 +261,6 @@ export function Approvals() {
     mutationFn: ({ id, note }: { id: number; note: string }) => rejectApproval(id, note),
     onSuccess: (_, variables) => {
       toast.success("Rejected successfully");
-      setRejectDialogOpen(false);
-      setDecisionNote("");
-      setActionError(null);
       nextItemToSelect(variables.id);
       queryClient.invalidateQueries({ queryKey: ["approvals"] });
       queryClient.invalidateQueries({ queryKey: ["approvals-counts"] });
@@ -277,7 +268,6 @@ export function Approvals() {
       queryClient.invalidateQueries({ queryKey: ["candidates"] });
     },
     onError: (err: Error) => {
-      setActionError(err.message || "Failed to reject");
       if (err.message.includes("409") || err.message.includes("already decided")) {
         queryClient.invalidateQueries({ queryKey: ["approvals"] });
         queryClient.invalidateQueries({ queryKey: ["approvals-counts"] });
@@ -289,38 +279,16 @@ export function Approvals() {
     setSearchParams({ status: val });
   };
 
-  const openApprove = () => {
-    setActionError(null);
-    setDecisionNote("");
-    setApproveDialogOpen(true);
-  };
-
-  const openReject = () => {
-    setActionError(null);
-    setDecisionNote("");
-    setRejectDialogOpen(true);
-  };
-
-  const handleApproveSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleDecisionConfirm = async (note?: string) => {
     if (!selectedApproval) return;
-    approveMutation.mutate({
-      id: selectedApproval.id,
-      note: decisionNote.trim() || undefined,
-    });
-  };
-
-  const handleRejectSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!selectedApproval) return;
-    if (decisionNote.trim().length < 3) {
-      setActionError("Note must be at least 3 characters");
-      return;
+    if (decisionState.mode === "approve") {
+      await approveMutation.mutateAsync({ id: selectedApproval.id, note });
+    } else {
+      if (!note || note.trim().length < 3) {
+        throw new Error("Rejection reason must be at least 3 characters.");
+      }
+      await rejectMutation.mutateAsync({ id: selectedApproval.id, note: note.trim() });
     }
-    rejectMutation.mutate({
-      id: selectedApproval.id,
-      note: decisionNote.trim(),
-    });
   };
 
   const renderDetailContent = (approval: Approval) => {
@@ -432,7 +400,7 @@ export function Approvals() {
             ) : (
               <div className="flex items-center gap-3">
                 <Button
-                  onClick={openApprove}
+                  onClick={() => setDecisionState({ open: true, mode: "approve" })}
                   className="min-w-28"
                   disabled={approveMutation.isPending || rejectMutation.isPending}
                 >
@@ -440,7 +408,7 @@ export function Approvals() {
                 </Button>
                 <Button
                   variant="destructive"
-                  onClick={openReject}
+                  onClick={() => setDecisionState({ open: true, mode: "reject" })}
                   className="min-w-28"
                   disabled={approveMutation.isPending || rejectMutation.isPending}
                 >
@@ -627,110 +595,16 @@ export function Approvals() {
         </DialogContent>
       </Dialog>
 
-      {/* Approve Dialog */}
-      <Dialog open={approveDialogOpen} onOpenChange={setApproveDialogOpen}>
-        <DialogContent className="sm:max-w-md">
-          <form onSubmit={handleApproveSubmit}>
-            <DialogHeader>
-              <DialogTitle>Approve this request?</DialogTitle>
-              <DialogDescription>
-                {selectedApproval?.action_type === "shortlist"
-                  ? "Candidate moves to interview scheduling."
-                  : `This will approve the ${selectedApproval?.action_type.replace("_", " ")} request.`}
-              </DialogDescription>
-            </DialogHeader>
-
-            {actionError && (
-              <div className="mt-3 p-2.5 rounded-md bg-destructive/10 text-destructive text-sm flex items-center gap-2">
-                <AlertCircle className="h-4 w-4 flex-shrink-0" />
-                <span>{actionError}</span>
-              </div>
-            )}
-
-            <div className="py-4 space-y-2">
-              <Label htmlFor="approve-note">Note (optional)</Label>
-              <Textarea
-                id="approve-note"
-                value={decisionNote}
-                onChange={(e) => setDecisionNote(e.target.value)}
-                placeholder="Add any context or next steps..."
-                rows={3}
-                disabled={approveMutation.isPending}
-              />
-            </div>
-
-            <DialogFooter>
-              <DialogClose asChild>
-                <Button type="button" variant="outline" disabled={approveMutation.isPending}>
-                  Cancel
-                </Button>
-              </DialogClose>
-              <Button type="submit" disabled={approveMutation.isPending}>
-                {approveMutation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                Confirm Approval
-              </Button>
-            </DialogFooter>
-          </form>
-        </DialogContent>
-      </Dialog>
-
-      {/* Reject Dialog */}
-      <Dialog open={rejectDialogOpen} onOpenChange={setRejectDialogOpen}>
-        <DialogContent className="sm:max-w-md">
-          <form onSubmit={handleRejectSubmit}>
-            <DialogHeader>
-              <DialogTitle>
-                Reject this {selectedApproval?.action_type.replace("_", " ")}?
-              </DialogTitle>
-              <DialogDescription>
-                Provide a clear reason for the rejection. A minimum of 3 characters is required.
-              </DialogDescription>
-            </DialogHeader>
-
-            {actionError && (
-              <div className="mt-3 p-2.5 rounded-md bg-destructive/10 text-destructive text-sm flex items-center gap-2">
-                <AlertCircle className="h-4 w-4 flex-shrink-0" />
-                <span>{actionError}</span>
-              </div>
-            )}
-
-            <div className="py-4 space-y-2">
-              <Label htmlFor="reject-note">Rejection Reason</Label>
-              <Textarea
-                id="reject-note"
-                value={decisionNote}
-                onChange={(e) => {
-                  setDecisionNote(e.target.value);
-                  if (actionError) setActionError(null);
-                }}
-                placeholder="Explain why this request is being rejected..."
-                rows={3}
-                disabled={rejectMutation.isPending}
-                required
-              />
-              <p className="text-xs text-muted-foreground">
-                {decisionNote.trim().length} / 3 characters minimum
-              </p>
-            </div>
-
-            <DialogFooter>
-              <DialogClose asChild>
-                <Button type="button" variant="outline" disabled={rejectMutation.isPending}>
-                  Cancel
-                </Button>
-              </DialogClose>
-              <Button
-                type="submit"
-                variant="destructive"
-                disabled={rejectMutation.isPending || decisionNote.trim().length < 3}
-              >
-                {rejectMutation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                Reject
-              </Button>
-            </DialogFooter>
-          </form>
-        </DialogContent>
-      </Dialog>
+      {/* Reusable Decision Dialog */}
+      {selectedApproval && (
+        <DecisionDialog
+          open={decisionState.open}
+          onOpenChange={(open) => setDecisionState((prev) => ({ ...prev, open }))}
+          mode={decisionState.mode}
+          targetType={selectedApproval.action_type}
+          onConfirm={handleDecisionConfirm}
+        />
+      )}
     </div>
   );
 }
