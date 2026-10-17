@@ -1,4 +1,4 @@
-import type { TokenResponse, User, Candidate, Application, Approval, Letter, AuditLog, Job, CandidateCreate, ApplicationCreate, ApprovalDecisionRequest, OfferDraftRequest, RegisterTenantRequest, JobCreate, ApprovalRead, AuditLogRead, LetterRead } from "./types";
+import type { TokenResponse, User, Candidate, Application, Approval, ApprovalCounts, Letter, AuditLog, Job, CandidateCreate, ApplicationCreate, ApprovalDecisionRequest, OfferDraftRequest, RegisterTenantRequest, JobCreate, ApprovalRead, AuditLogRead, LetterRead } from "./types";
 
 const API_URL = import.meta.env.VITE_API_URL ?? "http://localhost:8000";
 
@@ -167,6 +167,10 @@ export async function approveApproval(id: number, note?: string): Promise<Approv
   });
 }
 
+export async function getApprovalCounts(): Promise<ApprovalCounts> {
+  return apiRequest<ApprovalCounts>("/approvals/counts");
+}
+
 export async function rejectApproval(id: number, note: string): Promise<ApprovalRead> {
   return apiRequest<ApprovalRead>(`/approvals/${id}/reject`, {
     method: "POST",
@@ -222,4 +226,4 @@ export async function downloadLetter(letterId: number): Promise<Blob> {
 }
 
 export { getToken, setToken, clearToken, API_URL };
-export type { User, Candidate, Application, Approval, Letter, AuditLog, Job, CandidateCreate, ApplicationCreate, ApprovalDecisionRequest, OfferDraftRequest, RegisterTenantRequest, TokenResponse, JobCreate, ApprovalRead, AuditLogRead, LetterRead };
+export type { User, Candidate, Application, Approval, ApprovalCounts, Letter, AuditLog, Job, CandidateCreate, ApplicationCreate, ApprovalDecisionRequest, OfferDraftRequest, RegisterTenantRequest, TokenResponse, JobCreate, ApprovalRead, AuditLogRead, LetterRead };

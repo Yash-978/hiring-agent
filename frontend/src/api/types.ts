@@ -76,6 +76,12 @@ export interface Approval {
   created_at: string;
 }
 
+export interface ApprovalCounts {
+  pending: number;
+  approved: number;
+  rejected: number;
+}
+
 export interface ApprovalRead {
   id: number;
   tenant_id: number;
