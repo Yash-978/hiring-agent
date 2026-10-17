@@ -1,5 +1,5 @@
-import { useParams } from "react-router-dom";
-import { useState } from "react";
+import { useState, type FormEvent, type ReactNode } from "react";
+import { Link, useParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -8,17 +8,53 @@ import { Separator } from "@/components/ui/separator";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
-import { ArrowLeft, Brain, Shield, User, FileText, AlertTriangle, CheckCircle, XCircle, Download, Loader2, AlertCircle, FileCheck } from "lucide-react";
-import { Link } from "react-router-dom";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
+  AlertCircle,
+  AlertTriangle,
+  ArrowLeft,
+  Brain,
+  CheckCircle,
+  Download,
+  FileCheck,
+  FileText,
+  Loader2,
+  Shield,
+  User,
+  XCircle,
+} from "lucide-react";
 import { toast } from "sonner";
-import { apiRequest, getApplicationAudit, createOfferDraft, downloadLetter, type Application, type Approval, type AuditLogRead, type Letter } from "@/api/client";
+import {
+  apiRequest,
+  createOfferDraft,
+  downloadLetter,
+  getApplicationAudit,
+  type Application,
+  type Approval,
+  type AuditLogRead,
+} from "@/api/client";
 import { AnalysisView } from "@/components/AnalysisView";
 import { ResumePanel } from "@/components/ResumePanel";
 import { ScoreDisplay } from "@/components/ScoreDisplay";
 
-const statusColors: Record<string, "default" | "secondary" | "destructive" | "outline"> = {
+type BadgeVariant = "default" | "secondary" | "destructive" | "outline";
+type JsonObject = Record<string, unknown>;
+
+const statusColors: Record<string, BadgeVariant> = {
   new: "default",
   analyzed: "secondary",
   "shortlist pending": "secondary",
@@ -29,10 +65,16 @@ const statusColors: Record<string, "default" | "secondary" | "destructive" | "ou
   hired: "secondary",
 };
 
-const actorTypeBadge: Record<string, { variant: "default" | "secondary" | "destructive" | "outline"; icon: React.ReactNode }> = {
+const actorTypeBadge: Record<string, { variant: BadgeVariant; icon: ReactNode }> = {
   agent: { variant: "default", icon: <Brain className="h-3 w-3" /> },
   user: { variant: "secondary", icon: <User className="h-3 w-3" /> },
   system: { variant: "outline", icon: <Shield className="h-3 w-3" /> },
+};
+
+const actorCircle: Record<string, string> = {
+  agent: "border-primary bg-primary/10",
+  user: "border-secondary bg-secondary/10",
+  system: "border-muted bg-muted/50",
 };
 
 function formatDate(dateString: string): string {
@@ -43,8 +85,59 @@ function formatDate(dateString: string): string {
     day: "numeric",
     hour: "2-digit",
     minute: "2-digit",
-    second: "2-digit",
   });
+}
+
+function asObject(value: unknown): JsonObject {
+  return value !== null && typeof value === "object" && !Array.isArray(value)
+    ? (value as JsonObject)
+    : {};
+}
+
+function asStringArray(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === "string")
+    : [];
+}
+
+function latest<T extends { id: number }>(items: T[]): T | undefined {
+  return [...items].sort((a, b) => b.id - a.id)[0];
+}
+
+interface OfferView {
+  approval: Approval;
+  letterId: number;
+  content: string;
+}
+
+/**
+ * Finds the offer for this application.
+ * If the approvals carry an application_id in their payload we match on it.
+ * Otherwise (older data) we fall back to the newest offer approval, which is
+ * only correct while a company has a single offer. The proper fix is a backend
+ * endpoint GET /applications/{id}/offer.
+ */
+function findOffer(approvals: Approval[], applicationId: number): OfferView | null {
+  const offers = approvals.filter(
+    (a) => a.target_type === "letter" && a.action_type === "offer_letter",
+  );
+  const tagged = offers.filter((a) => asObject(a.payload).application_id !== undefined);
+  const matching =
+    tagged.length > 0
+      ? tagged.filter((a) => Number(asObject(a.payload).application_id) === applicationId)
+      : offers;
+  const approval = latest(matching);
+  if (!approval) return null;
+
+  const payload = asObject(approval.payload);
+  const content =
+    typeof payload.letter_content === "string"
+      ? payload.letter_content
+      : typeof payload.content === "string"
+        ? payload.content
+        : "";
+
+  return { approval, letterId: approval.target_id, content };
 }
 
 function StatusBadge({ status }: { status: string }) {
@@ -78,46 +171,48 @@ function AuditTimeline({ auditLogs }: { auditLogs: AuditLogRead[] }) {
         <ScrollArea className="h-[400px]">
           <div className="space-y-4">
             {auditLogs.map((log, index) => {
-              const badgeConfig = actorTypeBadge[log.actor_type] ?? { variant: "outline" as const, icon: <AlertTriangle className="h-3 w-3" /> };
+              const badgeConfig = actorTypeBadge[log.actor_type] ?? {
+                variant: "outline" as const,
+                icon: <AlertTriangle className="h-3 w-3" />,
+              };
               const isLast = index === auditLogs.length - 1;
 
               return (
                 <div key={log.id} className="relative flex gap-4">
-                  <div className="flex flex-col items-center flex-shrink-0">
+                  <div className="flex flex-shrink-0 flex-col items-center">
                     <div
-                      className={`relative flex items-center justify-center w-8 h-8 rounded-full border-2 ${
-                        log.actor_type === "agent"
-                          ? "border-primary bg-primary/10"
-                          : log.actor_type === "user"
-                          ? "border-secondary bg-secondary/10"
-                          : "border-muted bg-muted/50"
-                      }`}
+                      className={`relative flex h-8 w-8 items-center justify-center rounded-full border-2 ${actorCircle[log.actor_type] ?? "border-muted bg-muted/50"
+                        }`}
                     >
                       {badgeConfig.icon}
                     </div>
                     {!isLast && (
-                      <div className="absolute top-8 bottom-0 left-3 w-0.5 bg-border" />
+                      <div className="absolute bottom-0 left-3 top-8 w-0.5 bg-border" />
                     )}
                   </div>
-                  <div className="flex-1 min-w-0 pt-1 pb-4">
-                    <div className="flex items-center gap-2 mb-1">
+                  <div className="min-w-0 flex-1 pb-4 pt-1">
+                    <div className="mb-1 flex items-center gap-2">
                       <Badge variant={badgeConfig.variant} className="gap-1">
                         {badgeConfig.icon}
                         {log.actor_type.charAt(0).toUpperCase() + log.actor_type.slice(1)}
                       </Badge>
                       <span className="text-sm text-muted-foreground">{log.actor_name}</span>
                     </div>
-                    <div className="flex items-center gap-3 text-sm text-muted-foreground mb-2">
-                      <span className="font-medium capitalize">{log.action.replace(/_/g, " ")}</span>
+                    <div className="mb-2 flex items-center gap-3 text-sm text-muted-foreground">
+                      <span className="font-medium capitalize">
+                        {log.action.replace(/_/g, " ")}
+                      </span>
                       <span>on</span>
-                      <span>{log.entity_type} #{log.entity_id}</span>
+                      <span>
+                        {log.entity_type} #{log.entity_id}
+                      </span>
                     </div>
-                    <div className="text-xs text-muted-foreground mb-2">
+                    <div className="mb-2 text-xs text-muted-foreground">
                       {formatDate(log.created_at)}
                     </div>
                     {log.details && Object.keys(log.details).length > 0 && (
-                      <div className="bg-muted/50 rounded-md p-3 text-xs overflow-auto max-h-48">
-                        <pre className="font-mono whitespace-pre-wrap">
+                      <div className="max-h-48 overflow-auto rounded-md bg-muted/50 p-3 text-xs">
+                        <pre className="whitespace-pre-wrap font-mono">
                           {JSON.stringify(log.details, null, 2)}
                         </pre>
                       </div>
@@ -133,8 +228,16 @@ function AuditTimeline({ auditLogs }: { auditLogs: AuditLogRead[] }) {
   );
 }
 
-function ApprovalsSection({ approvals, applicationId }: { approvals: Approval[]; applicationId: number }) {
-  const appApprovals = approvals.filter(a => a.target_type === "application" && a.target_id === applicationId);
+function ApprovalsSection({
+  approvals,
+  applicationId,
+}: {
+  approvals: Approval[];
+  applicationId: number;
+}) {
+  const appApprovals = approvals.filter(
+    (a) => a.target_type === "application" && a.target_id === applicationId,
+  );
 
   if (!appApprovals.length) {
     return (
@@ -157,15 +260,20 @@ function ApprovalsSection({ approvals, applicationId }: { approvals: Approval[];
       <CardContent>
         <div className="space-y-3">
           {appApprovals.map((approval) => (
-            <div key={approval.id} className="border rounded-lg p-4 space-y-3">
+            <div key={approval.id} className="space-y-3 rounded-lg border p-4">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
-                  <Badge variant="outline">{approval.action_type.replace("_", " ")}</Badge>
-                  <Badge variant={
-                    approval.status === "approved" ? "secondary" :
-                    approval.status === "rejected" ? "destructive" :
-                    "default"
-                  } className="capitalize">
+                  <Badge variant="outline">{approval.action_type.replace(/_/g, " ")}</Badge>
+                  <Badge
+                    variant={
+                      approval.status === "approved"
+                        ? "secondary"
+                        : approval.status === "rejected"
+                          ? "destructive"
+                          : "default"
+                    }
+                    className="capitalize"
+                  >
                     {approval.status}
                   </Badge>
                 </div>
@@ -174,7 +282,7 @@ function ApprovalsSection({ approvals, applicationId }: { approvals: Approval[];
                 </span>
               </div>
 
-              <div className="grid gap-2 sm:grid-cols-2 text-sm">
+              <div className="grid gap-2 text-sm sm:grid-cols-2">
                 <div>
                   <span className="font-medium text-muted-foreground">Created: </span>
                   {formatDate(approval.created_at)}
@@ -201,8 +309,8 @@ function ApprovalsSection({ approvals, applicationId }: { approvals: Approval[];
 
               {approval.payload && Object.keys(approval.payload).length > 0 && (
                 <div className="border-t pt-3">
-                  <span className="font-medium text-muted-foreground text-sm">Payload:</span>
-                  <pre className="mt-1 p-2 bg-muted rounded-md text-xs overflow-auto max-h-48">
+                  <span className="text-sm font-medium text-muted-foreground">Payload:</span>
+                  <pre className="mt-1 max-h-48 overflow-auto rounded-md bg-muted p-2 text-xs">
                     {JSON.stringify(approval.payload, null, 2)}
                   </pre>
                 </div>
@@ -215,27 +323,35 @@ function ApprovalsSection({ approvals, applicationId }: { approvals: Approval[];
   );
 }
 
+function LetterPreview({ title, content }: { title: string; content: string }) {
+  if (!content) return null;
+  return (
+    <div className="max-h-64 overflow-auto rounded-md border bg-muted/50 p-4">
+      <span className="mb-2 block text-sm font-medium text-muted-foreground">{title}</span>
+      <pre className="whitespace-pre-wrap font-mono text-sm">{content}</pre>
+    </div>
+  );
+}
+
 function OfferSection({
   application,
   approvals,
-  onEditOffer,
+  onOpenOfferForm,
 }: {
   application: Application;
   approvals: Approval[];
-  onEditOffer: () => void;
+  onOpenOfferForm: () => void;
 }) {
-  // Find shortlist approval
-  const shortlistApproval = approvals.find(
-    a => a.target_type === "application" && a.target_id === application.id && a.action_type === "shortlist"
+  const shortlistApproval = latest(
+    approvals.filter(
+      (a) =>
+        a.target_type === "application" &&
+        a.target_id === application.id &&
+        a.action_type === "shortlist",
+    ),
   );
-
-  // Find offer approval
-  const offerApproval = approvals.find(
-    a => a.target_type === "letter" && a.action_type === "offer_letter"
-  );
-
-  // Find letter
-  const letter = approvals.find(a => a.target_type === "letter" && a.action_type === "offer_letter")?.payload as Letter | undefined;
+  const offer = findOffer(approvals, application.id);
+  const offerApproval = offer?.approval;
 
   const isShortlistApproved = shortlistApproval?.status === "approved";
   const isOfferPending = offerApproval?.status === "pending";
@@ -243,22 +359,22 @@ function OfferSection({
   const isOfferRejected = offerApproval?.status === "rejected";
 
   const handleDownload = async () => {
-    if (!letter?.id) return;
+    if (!offer) return;
     try {
-      const blob = await downloadLetter(letter.id);
+      const blob = await downloadLetter(offer.letterId);
       const url = window.URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `offer_letter_${letter.id}.docx`;
-      document.body.appendChild(a);
-      a.click();
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `offer_letter_${offer.letterId}.docx`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
       window.URL.revokeObjectURL(url);
-      document.body.removeChild(a);
       toast.success("Letter downloaded");
     } catch (err) {
       if (err instanceof Error) {
         if (err.message.includes("403") || err.message.includes("not approved")) {
-          toast.error("Offer approval must be approved before downloading.");
+          toast.error("The offer must be approved before downloading.");
         } else if (err.message.includes("404") || err.message.includes("not generated")) {
           toast.error("Letter not generated yet. Please wait for approval.");
         } else {
@@ -279,10 +395,10 @@ function OfferSection({
             Create Offer
           </CardTitle>
         </CardHeader>
-        <CardContent className="text-center py-8">
-          <AlertCircle className="h-12 w-12 mx-auto text-muted-foreground/50 mb-4" />
-          <h3 className="text-lg font-medium mb-2">Awaiting Shortlist Approval</h3>
-          <p className="text-muted-foreground mb-4">
+        <CardContent className="py-8 text-center">
+          <AlertCircle className="mx-auto mb-4 h-12 w-12 text-muted-foreground/50" />
+          <h3 className="mb-2 text-lg font-medium">Awaiting Shortlist Approval</h3>
+          <p className="mb-4 text-muted-foreground">
             The shortlist approval must be approved before you can create an offer.
           </p>
           <Badge variant="default" className="capitalize">
@@ -293,7 +409,6 @@ function OfferSection({
     );
   }
 
-  // Shortlist approved - show offer form or letter
   if (isOfferPending) {
     return (
       <Card>
@@ -306,28 +421,20 @@ function OfferSection({
         <CardContent className="space-y-4">
           <div className="flex items-center gap-2">
             <Badge variant="outline">Awaiting Approval</Badge>
-            <Badge variant="outline" className="capitalize">Offer pending</Badge>
           </div>
           <p className="text-muted-foreground">
             The offer draft has been created and is awaiting approval.
           </p>
-          {letter && (
-            <div className="border rounded-md p-4 bg-muted/50 max-h-64 overflow-auto">
-              <label className="font-medium text-sm text-muted-foreground mb-2 block">Draft Letter Content</label>
-              <pre className="whitespace-pre-wrap text-sm font-mono">
-                {letter.content}
-              </pre>
-            </div>
-          )}
+          <LetterPreview title="Draft Letter Content" content={offer?.content ?? ""} />
           <div className="flex gap-2">
             <Button variant="outline" asChild>
               <Link to="/approvals">
-                <FileCheck className="h-4 w-4 mr-2" />
+                <FileCheck className="mr-2 h-4 w-4" />
                 View in Approvals
               </Link>
             </Button>
-            <Button variant="outline" onClick={onEditOffer}>
-              Edit Offer
+            <Button variant="outline" onClick={onOpenOfferForm}>
+              Create a new draft
             </Button>
           </div>
         </CardContent>
@@ -345,26 +452,17 @@ function OfferSection({
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
-          <div className="flex items-center gap-2">
-            <Badge variant="secondary" className="capitalize">Approved</Badge>
-          </div>
+          <Badge variant="secondary" className="capitalize">
+            Approved
+          </Badge>
           <p className="text-muted-foreground">
             The offer has been approved. You can now download the offer letter.
           </p>
-          {letter && (
-            <div className="border rounded-md p-4 bg-muted/50 max-h-64 overflow-auto">
-              <label className="font-medium text-sm text-muted-foreground mb-2 block">Offer Letter Content</label>
-              <pre className="whitespace-pre-wrap text-sm font-mono">
-                {letter.content}
-              </pre>
-            </div>
-          )}
-          {letter && (
-            <Button onClick={handleDownload} className="w-full sm:w-auto">
-              <Download className="h-4 w-4 mr-2" />
-              Download Letter (.docx)
-            </Button>
-          )}
+          <LetterPreview title="Offer Letter Content" content={offer?.content ?? ""} />
+          <Button onClick={handleDownload} className="w-full sm:w-auto">
+            <Download className="mr-2 h-4 w-4" />
+            Download Letter (.docx)
+          </Button>
         </CardContent>
       </Card>
     );
@@ -380,24 +478,24 @@ function OfferSection({
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
-          <div className="flex items-center gap-2">
-            <Badge variant="destructive" className="capitalize">Rejected</Badge>
-          </div>
+          <Badge variant="destructive" className="capitalize">
+            Rejected
+          </Badge>
           <p className="text-muted-foreground">
             The offer was rejected. You can create a new offer draft.
           </p>
           {offerApproval?.decision_note && (
-            <div className="bg-destructive/10 border border-destructive/20 rounded-md p-3">
-              <span className="font-medium text-sm text-destructive">Rejection reason: </span>
+            <div className="rounded-md border border-destructive/20 bg-destructive/10 p-3">
+              <span className="text-sm font-medium text-destructive">Rejection reason: </span>
               {offerApproval.decision_note}
             </div>
           )}
+          <Button onClick={onOpenOfferForm}>Create a new offer draft</Button>
         </CardContent>
       </Card>
     );
   }
 
-  // No offer yet - show create button
   return (
     <Card>
       <CardHeader>
@@ -410,6 +508,7 @@ function OfferSection({
         <p className="text-muted-foreground">
           Shortlist approved. Create an offer draft for this candidate.
         </p>
+        <Button onClick={onOpenOfferForm}>Create offer draft</Button>
       </CardContent>
     </Card>
   );
@@ -420,22 +519,26 @@ export function CandidateDetail() {
   const applicationId = Number(id);
   const queryClient = useQueryClient();
 
-  const { data: application, isLoading: appLoading, error: appError } = useQuery({
+  const {
+    data: application,
+    isLoading: appLoading,
+    error: appError,
+  } = useQuery({
     queryKey: ["application", applicationId],
     queryFn: () => apiRequest<Application>(`/applications/${applicationId}`),
-    enabled: !isNaN(applicationId),
+    enabled: !Number.isNaN(applicationId),
   });
 
   const { data: approvals } = useQuery({
     queryKey: ["approvals"],
     queryFn: () => apiRequest<Approval[]>("/approvals"),
-    enabled: !isNaN(applicationId),
+    enabled: !Number.isNaN(applicationId),
   });
 
   const { data: auditLogs } = useQuery({
     queryKey: ["application-audit", applicationId],
     queryFn: () => getApplicationAudit(applicationId),
-    enabled: !isNaN(applicationId),
+    enabled: !Number.isNaN(applicationId),
   });
 
   const [showOfferForm, setShowOfferForm] = useState(false);
@@ -444,23 +547,31 @@ export function CandidateDetail() {
   const [startDate, setStartDate] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const handleOfferCreated = () => {
-    queryClient.invalidateQueries({ queryKey: ["approvals"] });
-    queryClient.invalidateQueries({ queryKey: ["application", applicationId] });
+  const refreshAfterOffer = () => {
+    void queryClient.invalidateQueries({ queryKey: ["approvals"] });
+    void queryClient.invalidateQueries({ queryKey: ["application", applicationId] });
+    void queryClient.invalidateQueries({ queryKey: ["application-audit", applicationId] });
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
     if (!salary || !startDate || !application) return;
+
+    const amount = Number(salary);
+    if (!Number.isFinite(amount) || amount <= 0) {
+      toast.error("Enter a valid salary greater than zero.");
+      return;
+    }
+
     setIsSubmitting(true);
     try {
       await createOfferDraft(application.id, {
-        salary: parseFloat(salary),
+        salary: amount,
         currency,
         start_date: startDate,
       });
       toast.success("Offer draft created");
-      handleOfferCreated();
+      refreshAfterOffer();
       setShowOfferForm(false);
       setSalary("");
       setStartDate("");
@@ -481,8 +592,8 @@ export function CandidateDetail() {
 
   if (appLoading) {
     return (
-      <div className="flex items-center justify-center h-64">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary" />
+      <div className="flex h-64 items-center justify-center">
+        <div className="h-8 w-8 animate-spin rounded-full border-b-2 border-primary" />
       </div>
     );
   }
@@ -491,19 +602,26 @@ export function CandidateDetail() {
     return (
       <div className="p-6">
         <Card>
-          <CardContent className="text-center py-8 text-destructive">
-            Failed to load application: {appError instanceof Error ? appError.message : "Not found"}
+          <CardContent className="py-8 text-center text-destructive">
+            Failed to load application:{" "}
+            {appError instanceof Error ? appError.message : "Not found"}
           </CardContent>
         </Card>
       </div>
     );
   }
 
+  const payload = asObject(application.payload);
+  const skills = asStringArray(payload.skills);
+  const missingSkills = asStringArray(payload.missing_skills);
+  const yearsExp = payload.years_experience;
+  const hasYears = yearsExp !== undefined && yearsExp !== null && yearsExp !== "";
+
   return (
-    <div className="p-6 space-y-6 max-w-4xl">
+    <div className="max-w-4xl space-y-6 p-6">
       <Button variant="ghost" size="sm" asChild className="mb-4">
         <Link to="/candidates">
-          <ArrowLeft className="h-4 w-4 mr-2" />
+          <ArrowLeft className="mr-2 h-4 w-4" />
           Back to Candidates
         </Link>
       </Button>
@@ -513,7 +631,7 @@ export function CandidateDetail() {
           <div className="flex items-start justify-between gap-4">
             <div>
               <CardTitle>{application.candidate_name}</CardTitle>
-              <div className="flex items-center gap-3 mt-2 text-sm text-muted-foreground">
+              <div className="mt-2 flex items-center gap-3 text-sm text-muted-foreground">
                 <span className="flex items-center gap-1">
                   <FileText className="h-4 w-4" />
                   {application.job_title}
@@ -530,9 +648,9 @@ export function CandidateDetail() {
           <Separator />
 
           <div className="grid gap-4 md:grid-cols-3">
-            <div className="md:col-span-2 space-y-4">
-              <div className="bg-primary/5 border border-primary/20 rounded-lg p-4">
-                <div className="flex items-center justify-between flex-wrap gap-2">
+            <div className="space-y-4 md:col-span-2">
+              <div className="rounded-lg border border-primary/20 bg-primary/5 p-4">
+                <div className="flex flex-wrap items-center justify-between gap-2">
                   <div className="flex items-center gap-2">
                     <Brain className="h-5 w-5 text-primary" />
                     <span className="font-medium">Match Score</span>
@@ -540,63 +658,62 @@ export function CandidateDetail() {
                   <ScoreDisplay score={application.score} />
                 </div>
                 {application.score_reasoning && (
-                  <p className="mt-2 text-sm text-muted-foreground">{application.score_reasoning}</p>
+                  <p className="mt-2 text-sm text-muted-foreground">
+                    {application.score_reasoning}
+                  </p>
                 )}
               </div>
 
-              {(() => {
-                const skills = (application.payload?.skills as string[]) ?? [];
-                const missingSkills = (application.payload?.missing_skills as string[]) ?? [];
-                const yearsExp = application.payload?.years_experience;
-                return (
-                  <>
-                    {skills.length > 0 && (
-                      <div>
-                        <label className="text-sm font-medium text-muted-foreground">Matched Skills</label>
-                        <div className="flex flex-wrap gap-2 mt-2">
-                          {skills.map((skill: string) => (
-                            <Badge key={skill} variant="secondary">
-                              {skill}
-                            </Badge>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-                    {missingSkills.length > 0 && (
-                      <div>
-                        <label className="text-sm font-medium text-muted-foreground">Missing Skills</label>
-                        <div className="flex flex-wrap gap-2 mt-2">
-                          {missingSkills.map((skill: string) => (
-                            <Badge key={skill} variant="destructive">
-                              {skill}
-                            </Badge>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-                    {yearsExp !== undefined && (
-                      <div>
-                        <label className="text-sm font-medium text-muted-foreground">Years Experience</label>
-                        <p className="text-lg font-semibold mt-1">
-                          {String(yearsExp)}
-                        </p>
-                      </div>
-                    )}
-                  </>
-                );
-              })()}
+              {skills.length > 0 && (
+                <div>
+                  <span className="text-sm font-medium text-muted-foreground">
+                    Matched Skills
+                  </span>
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {skills.map((skill) => (
+                      <Badge key={skill} variant="secondary">
+                        {skill}
+                      </Badge>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {missingSkills.length > 0 && (
+                <div>
+                  <span className="text-sm font-medium text-muted-foreground">
+                    Missing Skills
+                  </span>
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {missingSkills.map((skill) => (
+                      <Badge key={skill} variant="destructive">
+                        {skill}
+                      </Badge>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {hasYears && (
+                <div>
+                  <span className="text-sm font-medium text-muted-foreground">
+                    Years Experience
+                  </span>
+                  <p className="mt-1 text-lg font-semibold">{String(yearsExp)}</p>
+                </div>
+              )}
             </div>
 
             <div className="space-y-4">
-              <div className="bg-muted/50 rounded-lg p-4">
-                <label className="text-sm font-medium text-muted-foreground">Status</label>
+              <div className="rounded-lg bg-muted/50 p-4">
+                <span className="text-sm font-medium text-muted-foreground">Status</span>
                 <div className="mt-1">
                   <StatusBadge status={application.status} />
                 </div>
               </div>
 
-              <div className="bg-muted/50 rounded-lg p-4">
-                <label className="text-sm font-medium text-muted-foreground">Created</label>
+              <div className="rounded-lg bg-muted/50 p-4">
+                <span className="text-sm font-medium text-muted-foreground">Created</span>
                 <p className="mt-1 text-sm">{formatDate(application.created_at)}</p>
               </div>
             </div>
@@ -611,7 +728,7 @@ export function CandidateDetail() {
           <OfferSection
             application={application}
             approvals={approvals ?? []}
-            onEditOffer={() => setShowOfferForm(true)}
+            onOpenOfferForm={() => setShowOfferForm(true)}
           />
 
           <Separator />
@@ -633,7 +750,8 @@ export function CandidateDetail() {
                 Fill in the offer details. The shortlist must be approved.
               </DialogDescription>
             </DialogHeader>
-            <DialogContent className="grid gap-4 py-4">
+
+            <div className="grid gap-4 py-4">
               <div className="grid gap-2">
                 <Label htmlFor="salary">Salary</Label>
                 <Input
@@ -648,10 +766,16 @@ export function CandidateDetail() {
                   required
                 />
               </div>
+
               <div className="grid gap-2">
                 <Label htmlFor="currency">Currency</Label>
-                <Select value={currency} onValueChange={setCurrency} disabled={isSubmitting} required>
-                  <SelectTrigger>
+                <Select
+                  value={currency}
+                  onValueChange={setCurrency}
+                  disabled={isSubmitting}
+                  required
+                >
+                  <SelectTrigger id="currency">
                     <SelectValue placeholder="Select currency" />
                   </SelectTrigger>
                   <SelectContent>
@@ -663,6 +787,7 @@ export function CandidateDetail() {
                   </SelectContent>
                 </Select>
               </div>
+
               <div className="grid gap-2">
                 <Label htmlFor="startDate">Start Date</Label>
                 <Input
@@ -675,9 +800,15 @@ export function CandidateDetail() {
                   min={new Date().toISOString().split("T")[0]}
                 />
               </div>
-            </DialogContent>
+            </div>
+
             <DialogFooter>
-              <Button type="button" variant="outline" onClick={() => setShowOfferForm(false)} disabled={isSubmitting}>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setShowOfferForm(false)}
+                disabled={isSubmitting}
+              >
                 Cancel
               </Button>
               <Button type="submit" disabled={isSubmitting || !salary || !startDate}>

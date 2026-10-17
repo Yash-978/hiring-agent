@@ -33,12 +33,14 @@ class CompareCriterionRead(BaseModel):
     criterion: str
     kind: str
     verdict: str
+    evidence: str = ""
 
 
 class CompareCandidateRead(BaseModel):
     application_id: int
     name: str
     score: float | None
+    status: str = "new"
     recommendation: str
     confidence: str
     years: float | None = None
