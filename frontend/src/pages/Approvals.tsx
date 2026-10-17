@@ -16,6 +16,7 @@ import { Label } from "@/components/ui/label";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Skeleton } from "@/components/ui/skeleton";
 import { AnalysisView } from "@/components/AnalysisView";
+import { ScoreDisplay } from "@/components/ScoreDisplay";
 import {
   AlertCircle,
   CheckCircle,
@@ -327,6 +328,9 @@ export function Approvals() {
               <Briefcase className="h-4 w-4" />
               {approval.job_title ?? `Job #${approval.target_id}`}
             </p>
+            <div className="mt-2">
+              <ScoreDisplay score={approval.score} />
+            </div>
           </div>
 
           <div className="text-xs text-muted-foreground space-y-1">
@@ -563,9 +567,7 @@ export function Approvals() {
                     <Badge variant={approval.action_type === "shortlist" ? "default" : "outline"} className="text-xs">
                       {approval.action_type.replace("_", " ")}
                     </Badge>
-                    <Badge variant="secondary" className="text-xs font-mono">
-                      {score != null ? `${score.toFixed(0)} / 100` : "Not scored"}
-                    </Badge>
+                    <ScoreDisplay score={score} />
                   </div>
                 </Card>
               );

@@ -16,6 +16,7 @@ import { toast } from "sonner";
 import { apiRequest, getApplicationAudit, createOfferDraft, downloadLetter, type Application, type Approval, type AuditLogRead, type Letter } from "@/api/client";
 import { AnalysisView } from "@/components/AnalysisView";
 import { ResumePanel } from "@/components/ResumePanel";
+import { ScoreDisplay } from "@/components/ScoreDisplay";
 
 const statusColors: Record<string, "default" | "secondary" | "destructive" | "outline"> = {
   new: "default",
@@ -530,22 +531,18 @@ export function CandidateDetail() {
 
           <div className="grid gap-4 md:grid-cols-3">
             <div className="md:col-span-2 space-y-4">
-              {application.score !== null && (
-                <div className="bg-primary/5 border border-primary/20 rounded-lg p-4">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <Brain className="h-5 w-5 text-primary" />
-                      <span className="font-medium">Match Score</span>
-                    </div>
-                    <span className="text-2xl font-bold text-primary">
-                      {application.score.toFixed(1)} / 100
-                    </span>
+              <div className="bg-primary/5 border border-primary/20 rounded-lg p-4">
+                <div className="flex items-center justify-between flex-wrap gap-2">
+                  <div className="flex items-center gap-2">
+                    <Brain className="h-5 w-5 text-primary" />
+                    <span className="font-medium">Match Score</span>
                   </div>
-                  {application.score_reasoning && (
-                    <p className="mt-2 text-sm text-muted-foreground">{application.score_reasoning}</p>
-                  )}
+                  <ScoreDisplay score={application.score} />
                 </div>
-              )}
+                {application.score_reasoning && (
+                  <p className="mt-2 text-sm text-muted-foreground">{application.score_reasoning}</p>
+                )}
+              </div>
 
               {(() => {
                 const skills = (application.payload?.skills as string[]) ?? [];

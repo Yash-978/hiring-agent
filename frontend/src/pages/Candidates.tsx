@@ -13,6 +13,7 @@ import { Plus, Loader2, FileText, AlertCircle, BarChart3 } from "lucide-react";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
 import { apiRequest, apiUpload, type Application, type Job, type CandidateCreate, type ApplicationCreate, type JobCreate } from "@/api/client";
+import { ScoreDisplay } from "@/components/ScoreDisplay";
 
 const statusColors: Record<string, "default" | "secondary" | "destructive" | "outline"> = {
   new: "default",
@@ -397,7 +398,7 @@ export function Candidates() {
                     </TableCell>
                     <TableCell>{app.job_title}</TableCell>
                     <TableCell><StatusBadge status={app.status} /></TableCell>
-                    <TableCell>{app.score !== null ? app.score.toFixed(1) : "—"}</TableCell>
+                    <TableCell><ScoreDisplay score={app.score} /></TableCell>
                     <TableCell className="text-right text-muted-foreground">
                       {new Date(app.created_at).toLocaleDateString()}
                     </TableCell>

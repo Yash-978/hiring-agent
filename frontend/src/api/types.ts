@@ -167,6 +167,12 @@ export interface RegisterTenantRequest {
   password: string;
 }
 
+export interface MetaInfo {
+  llm_provider: string;
+  llm_model: string;
+  demo_mode: boolean;
+}
+
 export interface AnalysisJobRef {
   id: number;
   title: string;

@@ -1,7 +1,8 @@
 import { useAuth } from "@/auth/useAuth";
 import { Link, useLocation, Outlet } from "react-router-dom";
 import { Button } from "@/components/ui/button";
-import { LogOut, Users, FileCheck } from "lucide-react";
+import { LogOut, Users, FileCheck, AlertTriangle } from "lucide-react";
+import { useMeta } from "@/lib/useMeta";
 
 const navigation = [
   { name: "Candidates", href: "/candidates", icon: Users },
@@ -11,6 +12,7 @@ const navigation = [
 export function AppLayout() {
   const { user, logout } = useAuth();
   const location = useLocation();
+  const { data: meta } = useMeta();
 
   return (
     <div className="flex h-screen bg-background">
@@ -51,8 +53,19 @@ export function AppLayout() {
           </Button>
         </div>
       </aside>
-      <main className="flex-1 overflow-auto">
-        <Outlet />
+      <main className="flex-1 overflow-auto flex flex-col">
+        {meta?.demo_mode && (
+          <div
+            role="status"
+            className="w-full bg-amber-500/15 border-b border-amber-500/30 px-4 py-2 text-center text-xs sm:text-sm font-medium text-amber-900 dark:text-amber-200 flex items-center justify-center gap-2"
+          >
+            <AlertTriangle className="h-4 w-4 text-amber-600 dark:text-amber-400 flex-shrink-0" />
+            <span>Demo mode: scores come from a simple keyword matcher, not a real AI</span>
+          </div>
+        )}
+        <div className="flex-1">
+          <Outlet />
+        </div>
       </main>
     </div>
   );

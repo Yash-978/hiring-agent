@@ -40,6 +40,7 @@ import {
   verdictBadgeVariant,
   verdictLabel,
 } from "@/lib/verdict";
+import { ScoreDisplay } from "@/components/ScoreDisplay";
 import type { ApplicationAnalysis } from "@/api/types";
 
 interface AnalysisViewProps {
@@ -135,13 +136,8 @@ function AnalysisContent({ analysis }: { analysis: ApplicationAnalysis }) {
                 )}
               </div>
             </div>
-            <div className="text-right">
-              <div className="text-4xl font-bold leading-none">
-                {analysis.score.toFixed(1)}
-              </div>
-              <div className="text-xs uppercase tracking-wide text-muted-foreground">
-                score
-              </div>
+            <div className="text-right flex flex-col items-end gap-1">
+              <ScoreDisplay score={analysis.score} modelName={analysis.model} />
             </div>
           </div>
 
