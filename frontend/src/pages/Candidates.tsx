@@ -12,7 +12,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Plus, Loader2, FileText, AlertCircle, BarChart3 } from "lucide-react";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
-import { apiRequest, apiUpload, type Application, type Job, type CandidateCreate, type ApplicationCreate, type JobCreate } from "@/api/client";
+import { apiRequest, apiUpload, ApiError, type Application, type Job, type CandidateCreate, type ApplicationCreate, type JobCreate } from "@/api/client";
 import { ScoreDisplay } from "@/components/ScoreDisplay";
 
 const statusColors: Record<string, "default" | "secondary" | "destructive" | "outline"> = {
@@ -135,8 +135,14 @@ function NewCandidateDialog({ onSuccess, jobs }: NewCandidateDialogProps) {
   const [resumeFile, setResumeFile] = useState<File | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [analyzing, setAnalyzing] = useState(false);
+  const [conflictError, setConflictError] = useState<{
+    message: string;
+    existingAppId?: number;
+  } | null>(null);
 
   const queryClient = useQueryClient();
+
+  const uniqueJobs = Array.from(new Map(jobs.map((job) => [job.id, job])).values());
 
   const createCandidateMutation = useMutation({
     mutationFn: (data: CandidateCreate) => apiRequest<{ id: number }>("/candidates", { method: "POST", body: JSON.stringify(data) }),
@@ -151,6 +157,7 @@ function NewCandidateDialog({ onSuccess, jobs }: NewCandidateDialogProps) {
     if (!fullName.trim() || !email.trim() || !jobId || !resumeFile) return;
 
     setIsLoading(true);
+    setConflictError(null);
     try {
       // 1. Create candidate
       const candidate = await createCandidateMutation.mutateAsync({
@@ -179,9 +186,22 @@ function NewCandidateDialog({ onSuccess, jobs }: NewCandidateDialogProps) {
       setEmail("");
       setJobId("");
       setResumeFile(null);
+      setConflictError(null);
       onSuccess();
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Failed to add candidate");
+    } catch (err: unknown) {
+      if (err instanceof ApiError && err.status === 409) {
+        const errorData = err.data as Record<string, unknown> | undefined;
+        const existingAppId =
+          typeof errorData?.existing_application_id === "number"
+            ? errorData.existing_application_id
+            : undefined;
+        setConflictError({
+          message: err.message || "This candidate has already applied to this job.",
+          existingAppId,
+        });
+      } else {
+        toast.error(err instanceof Error ? err.message : "Failed to add candidate");
+      }
     } finally {
       setIsLoading(false);
       setAnalyzing(false);
@@ -201,13 +221,38 @@ function NewCandidateDialog({ onSuccess, jobs }: NewCandidateDialogProps) {
           <DialogHeader>
             <DialogTitle>Add new candidate</DialogTitle>
           </DialogHeader>
+
+          {conflictError && (
+            <div
+              role="alert"
+              className="mt-3 p-3 rounded-md bg-destructive/10 border border-destructive/20 text-destructive text-sm flex items-start gap-2"
+            >
+              <AlertCircle className="h-4 w-4 mt-0.5 flex-shrink-0" />
+              <div className="flex-1">
+                <p className="font-medium">{conflictError.message}</p>
+                {conflictError.existingAppId && (
+                  <Link
+                    to={`/candidates/${conflictError.existingAppId}`}
+                    className="text-primary underline font-medium text-xs mt-1 inline-block hover:opacity-80"
+                    onClick={() => setIsOpen(false)}
+                  >
+                    View existing candidate application &rarr;
+                  </Link>
+                )}
+              </div>
+            </div>
+          )}
+
           <div className="grid gap-4 py-4">
             <div className="grid gap-2">
               <Label htmlFor="fullName">Full name</Label>
               <Input
                 id="fullName"
                 value={fullName}
-                onChange={(e) => setFullName(e.target.value)}
+                onChange={(e) => {
+                  setFullName(e.target.value);
+                  if (conflictError) setConflictError(null);
+                }}
                 placeholder="e.g. Alice Smith"
                 disabled={isLoading}
                 required
@@ -219,7 +264,10 @@ function NewCandidateDialog({ onSuccess, jobs }: NewCandidateDialogProps) {
                 id="email"
                 type="email"
                 value={email}
-                onChange={(e) => setEmail(e.target.value)}
+                onChange={(e) => {
+                  setEmail(e.target.value);
+                  if (conflictError) setConflictError(null);
+                }}
                 placeholder="alice@example.com"
                 disabled={isLoading}
                 required
@@ -227,12 +275,20 @@ function NewCandidateDialog({ onSuccess, jobs }: NewCandidateDialogProps) {
             </div>
             <div className="grid gap-2">
               <Label htmlFor="jobId">Job</Label>
-              <Select value={jobId} onValueChange={setJobId} disabled={isLoading} required>
+              <Select
+                value={jobId}
+                onValueChange={(val) => {
+                  setJobId(val);
+                  if (conflictError) setConflictError(null);
+                }}
+                disabled={isLoading}
+                required
+              >
                 <SelectTrigger>
                   <SelectValue placeholder="Select a job" />
                 </SelectTrigger>
                 <SelectContent>
-                  {jobs.map((job) => (
+                  {uniqueJobs.map((job) => (
                     <SelectItem key={job.id} value={String(job.id)}>
                       {job.title}
                     </SelectItem>

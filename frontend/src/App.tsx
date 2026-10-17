@@ -7,6 +7,7 @@ import { Candidates } from "./pages/Candidates";
 import { CandidateDetail } from "./pages/CandidateDetail";
 import { JobCompare } from "./pages/JobCompare";
 import { Approvals } from "./pages/Approvals";
+import { Jobs } from "./pages/Jobs";
 
 export function App() {
   return (
@@ -17,6 +18,7 @@ export function App() {
           <Route element={<AppLayout />}>
             <Route path="/candidates" element={<Candidates />} />
             <Route path="/candidates/:id" element={<CandidateDetail />} />
+            <Route path="/jobs" element={<Jobs />} />
             <Route path="/jobs/:id/compare" element={<JobCompare />} />
             <Route path="/approvals" element={<Approvals />} />
           </Route>

@@ -11,6 +11,9 @@ export interface Job {
   title: string;
   description: string;
   status: string;
+  must_have_skills?: string[];
+  nice_to_have_skills?: string[];
+  min_years_experience?: number | null;
   candidate_count: number;
   created_at: string;
 }
@@ -19,6 +22,18 @@ export interface JobCreate {
   title: string;
   description: string;
   status?: string;
+  must_have_skills?: string[];
+  nice_to_have_skills?: string[];
+  min_years_experience?: number | null;
+}
+
+export interface JobUpdate {
+  title?: string;
+  description?: string;
+  status?: string;
+  must_have_skills?: string[];
+  nice_to_have_skills?: string[];
+  min_years_experience?: number | null;
 }
 
 export interface Candidate {

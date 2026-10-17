@@ -1,4 +1,4 @@
-import type { TokenResponse, User, Candidate, Application, Approval, ApprovalCounts, Letter, AuditLog, Job, CandidateCreate, ApplicationCreate, ApprovalDecisionRequest, OfferDraftRequest, RegisterTenantRequest, JobCreate, ApprovalRead, AuditLogRead, LetterRead, MetaInfo } from "./types";
+import type { TokenResponse, User, Candidate, Application, Approval, ApprovalCounts, Letter, AuditLog, Job, CandidateCreate, ApplicationCreate, ApprovalDecisionRequest, OfferDraftRequest, RegisterTenantRequest, JobCreate, JobUpdate, ApprovalRead, AuditLogRead, LetterRead, MetaInfo } from "./types";
 
 const API_URL = import.meta.env.VITE_API_URL ?? "http://localhost:8000";
 
@@ -171,6 +171,24 @@ export async function getApprovalCounts(): Promise<ApprovalCounts> {
   return apiRequest<ApprovalCounts>("/approvals/counts");
 }
 
+export async function getJobs(): Promise<Job[]> {
+  return apiRequest<Job[]>("/jobs");
+}
+
+export async function createJob(data: JobCreate): Promise<Job> {
+  return apiRequest<Job>("/jobs", {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+}
+
+export async function updateJob(id: number, data: JobUpdate): Promise<Job> {
+  return apiRequest<Job>(`/jobs/${id}`, {
+    method: "PATCH",
+    body: JSON.stringify(data),
+  });
+}
+
 export async function getMeta(): Promise<MetaInfo> {
   return apiRequest<MetaInfo>("/meta");
 }
@@ -230,4 +248,4 @@ export async function downloadLetter(letterId: number): Promise<Blob> {
 }
 
 export { getToken, setToken, clearToken, API_URL };
-export type { User, Candidate, Application, Approval, ApprovalCounts, Letter, AuditLog, Job, CandidateCreate, ApplicationCreate, ApprovalDecisionRequest, OfferDraftRequest, RegisterTenantRequest, TokenResponse, JobCreate, ApprovalRead, AuditLogRead, LetterRead, MetaInfo };
+export type { User, Candidate, Application, Approval, ApprovalCounts, Letter, AuditLog, Job, CandidateCreate, ApplicationCreate, ApprovalDecisionRequest, OfferDraftRequest, RegisterTenantRequest, TokenResponse, JobCreate, JobUpdate, ApprovalRead, AuditLogRead, LetterRead, MetaInfo };

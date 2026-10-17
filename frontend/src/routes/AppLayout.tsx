@@ -1,11 +1,12 @@
 import { useAuth } from "@/auth/useAuth";
 import { Link, useLocation, Outlet } from "react-router-dom";
 import { Button } from "@/components/ui/button";
-import { LogOut, Users, FileCheck, AlertTriangle } from "lucide-react";
+import { LogOut, Users, FileCheck, AlertTriangle, Briefcase } from "lucide-react";
 import { useMeta } from "@/lib/useMeta";
 
 const navigation = [
   { name: "Candidates", href: "/candidates", icon: Users },
+  { name: "Jobs", href: "/jobs", icon: Briefcase },
   { name: "Approvals", href: "/approvals", icon: FileCheck },
 ];
 
